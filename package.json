@@ -1,40 +1,31 @@
 {
   "name": "my-messenger",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "version": "1.0.0",
+  "description": "My Messenger Desktop App",
+  "author": "Handoun",
+  "main": "main.js",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "start": "electron .",
+    "dist": "electron-builder"
   },
-  "dependencies": {
-    "@capacitor-community/electron": "^5.0.1",
-    "@capacitor/android": "^8.3.0",
-    "@capacitor/cli": "^8.3.0",
-    "@capacitor/core": "^8.3.0",
-    "@ionic/react": "^8.8.3",
-    "axios": "^1.15.0",
-    "emoji-picker-react": "^4.18.0",
-    "peerjs": "^1.5.5",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "react-router-dom": "^7.14.0",
-    "socket.io-client": "^4.8.3"
+  "build": {
+    "appId": "com.example.messenger",
+    "productName": "My Messenger",
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.4",
-    "@types/node": "^24.12.2",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.1",
-    "eslint": "^9.39.4",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.5.2",
-    "globals": "^17.4.0",
-    "typescript": "~6.0.2",
-    "typescript-eslint": "^8.58.0",
-    "vite": "^8.0.4"
+    "electron": "^26.2.2",
+    "electron-builder": "^24.6.0"
   }
 }
