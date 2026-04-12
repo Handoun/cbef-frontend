@@ -3,3 +3,5 @@ dist/
 .env 
 android/ 
 electron/ 
+"electron/release/" 
+"electron/node_modules/" 
