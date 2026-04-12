@@ -1,0 +1,64 @@
+name: Build Desktop Apps
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npm run build
+      - run: npm install -g @capacitor/cli
+      - run: npx cap add @capacitor-community/electron
+      - run: npx cap sync @capacitor-community/electron
+      - run: cd electron && npm install
+      - run: cd electron && npm run dist -- --win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: My-Messenger-Windows
+          path: electron/release/*.exe
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npm run build
+      - run: npm install -g @capacitor/cli
+      - run: npx cap add @capacitor-community/electron
+      - run: npx cap sync @capacitor-community/electron
+      - run: cd electron && npm install
+      - run: cd electron && npm run dist -- --mac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: My-Messenger-macOS
+          path: electron/release/*.dmg
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npm run build
+      - run: npm install -g @capacitor/cli
+      - run: npx cap add @capacitor-community/electron
+      - run: npx cap sync @capacitor-community/electron
+      - run: cd electron && npm install
+      - run: cd electron && npm run dist -- --linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: My-Messenger-Linux
+          path: electron/release/*.AppImage
