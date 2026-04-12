@@ -1,0 +1,34 @@
+:root {
+  --bg-color: #f0f2f5;
+  --sidebar-bg: #ffffff;
+  --chat-bg: #efeae2;
+  --header-bg: #f0f2f5;
+  --input-bg: #ffffff;
+  --text-primary: #1a1a1a;
+  --text-secondary: #555;
+  --border-color: #e0e0e0;
+  --message-own-bg: #d9fdd3;
+  --message-other-bg: #ffffff;
+  --hover-bg: #f0f2f5;
+}
+
+[data-theme='dark'] {
+  --bg-color: #0b141a;
+  --sidebar-bg: #111b21;
+  --chat-bg: #0b141a;
+  --header-bg: #202c33;
+  --input-bg: #2a3942;
+  --text-primary: #e9edef;
+  --text-secondary: #8696a0;
+  --border-color: #222d34;
+  --message-own-bg: #005c4b;
+  --message-other-bg: #202c33;
+  --hover-bg: #202c33;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  transition: background-color 0.2s, color 0.2s;
+}
