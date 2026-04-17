@@ -1,67 +1,69 @@
 import { useState } from 'react';
 import axios from 'axios';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-const styles: { [key: string]: React.CSSProperties } = {
+const styles: any = {
   container: {
+    minHeight: '100vh',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: '100vh',
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    fontFamily: 'Segoe UI, Roboto, sans-serif',
+    background: 'linear-gradient(145deg, #0F2027 0%, #203A43 50%, #2C5364 100%)',
+    padding: 16,
   },
   card: {
-    background: 'white',
-    padding: '40px',
-    borderRadius: '20px',
-    boxShadow: '0 20px 40px rgba(0,0,0,0.1)',
+    background: 'rgba(255,255,255,0.9)',
+    backdropFilter: 'blur(12px)',
+    padding: '32px 24px',
+    borderRadius: 32,
+    boxShadow: '0 30px 50px rgba(0,0,0,0.2)',
     width: '100%',
-    maxWidth: '400px',
+    maxWidth: 400,
   },
   title: {
-    fontSize: '28px',
-    fontWeight: 600,
-    marginBottom: '30px',
+    fontSize: 36,
+    fontWeight: 800,
+    marginBottom: 24,
     textAlign: 'center',
-    color: '#333',
-  },
-  inputGroup: {
-    marginBottom: '20px',
+    color: '#1F2A3E',
+    letterSpacing: 2,
   },
   input: {
     width: '100%',
-    padding: '14px 16px',
-    fontSize: '16px',
-    border: '1px solid #ddd',
-    borderRadius: '12px',
+    padding: '16px 18px',
+    marginBottom: 16,
+    fontSize: 16,
+    border: '1px solid rgba(255,255,255,0.3)',
+    borderRadius: 40,
+    backgroundColor: 'rgba(255,255,255,0.7)',
     outline: 'none',
-    transition: 'border 0.2s',
-    boxSizing: 'border-box',
+    transition: '0.2s',
   },
   button: {
     width: '100%',
-    padding: '14px',
-    background: '#667eea',
+    padding: 16,
+    background: 'linear-gradient(135deg, #1F2A3E 0%, #2C3E50 100%)',
     color: 'white',
     border: 'none',
-    borderRadius: '12px',
-    fontSize: '18px',
-    fontWeight: 600,
+    borderRadius: 40,
+    fontSize: 18,
+    fontWeight: 700,
     cursor: 'pointer',
-    transition: 'background 0.2s',
+    boxShadow: '0 6px 12px rgba(0,0,0,0.1)',
   },
   link: {
     textAlign: 'center',
-    marginTop: '20px',
-    color: '#666',
+    marginTop: 20,
+    color: '#2C3E50',
   },
   error: {
-    color: '#e74c3c',
+    color: '#d32f2f',
     textAlign: 'center',
-    marginBottom: '15px',
+    marginBottom: 12,
+    fontWeight: 500,
   },
 };
 
@@ -69,52 +71,41 @@ export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
+    setError('');
     try {
-      const res = await axios.post(`${API_URL}/api/login`, { username, password });
+      const res = await axios.post(`${API_URL}/api/login`, { username, password }, { timeout: 8000 });
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('user', JSON.stringify(res.data.user));
       navigate('/chat');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Ошибка входа');
+      setError(err.response?.data?.error || 'Ошибка входа. Проверьте соединение.');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div style={styles.container}>
+    <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} style={styles.container}>
       <div style={styles.card}>
-        <h2 style={styles.title}>Вход в Messenger</h2>
+        <h2 style={styles.title}>CBEF</h2>
         {error && <div style={styles.error}>{error}</div>}
         <form onSubmit={handleSubmit}>
-          <div style={styles.inputGroup}>
-            <input
-              style={styles.input}
-              type="text"
-              placeholder="Логин"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
-              required
-            />
-          </div>
-          <div style={styles.inputGroup}>
-            <input
-              style={styles.input}
-              type="password"
-              placeholder="Пароль"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              required
-            />
-          </div>
-          <button style={styles.button} type="submit">Войти</button>
+          <input style={styles.input} type="text" placeholder="Логин" value={username} onChange={e => setUsername(e.target.value)} required disabled={loading} />
+          <input style={styles.input} type="password" placeholder="Пароль" value={password} onChange={e => setPassword(e.target.value)} required disabled={loading} />
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} style={styles.button} type="submit" disabled={loading}>
+            {loading ? 'Вход...' : 'Войти'}
+          </motion.button>
         </form>
         <div style={styles.link}>
-          Нет аккаунта? <Link to="/register" style={{ color: '#667eea' }}>Зарегистрироваться</Link>
+          Нет аккаунта? <Link to="/register" style={{ color: '#1F2A3E', fontWeight: 600 }}>Создать</Link>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

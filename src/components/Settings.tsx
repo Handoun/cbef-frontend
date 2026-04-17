@@ -1,131 +1,112 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 
 const styles: { [key: string]: React.CSSProperties } = {
   container: {
+    minHeight: '100vh',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: '100vh',
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    fontFamily: 'Segoe UI, Roboto, sans-serif',
+    background: 'linear-gradient(135deg, #0F2027 0%, #2C5364 100%)',
+    padding: 16,
   },
   card: {
-    background: 'white',
-    padding: '40px',
-    borderRadius: '20px',
-    boxShadow: '0 20px 40px rgba(0,0,0,0.1)',
+    background: 'rgba(255,255,255,0.9)',
+    backdropFilter: 'blur(12px)',
+    padding: 32,
+    borderRadius: 32,
+    boxShadow: '0 30px 50px rgba(0,0,0,0.2)',
     width: '100%',
-    maxWidth: '500px',
+    maxWidth: 500,
+    color: '#1a1a1a',
   },
   title: {
-    fontSize: '28px',
-    fontWeight: 600,
-    marginBottom: '30px',
+    fontSize: 28,
+    fontWeight: 700,
+    marginBottom: 24,
     textAlign: 'center',
-    color: '#333',
+    color: '#1F2A3E',
   },
   avatarSection: {
     display: 'flex',
     alignItems: 'center',
-    gap: '20px',
-    marginBottom: '30px',
+    gap: 24,
+    marginBottom: 28,
   },
   avatar: {
-    width: '100px',
-    height: '100px',
+    width: 100,
+    height: 100,
     borderRadius: '50%',
     objectFit: 'cover',
-    border: '3px solid #e0e0e0',
+    border: '3px solid white',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
   },
-  fileInput: {
-    display: 'none',
-  },
+  fileInput: { display: 'none' },
   uploadButton: {
-    padding: '8px 16px',
-    backgroundColor: '#667eea',
+    padding: '10px 18px',
+    background: '#2C3E50',
     color: 'white',
     border: 'none',
-    borderRadius: '20px',
+    borderRadius: 30,
     cursor: 'pointer',
-    fontSize: '14px',
     fontWeight: 500,
   },
-  inputGroup: {
-    marginBottom: '20px',
-  },
-  label: {
-    display: 'block',
-    marginBottom: '6px',
-    color: '#555',
-    fontWeight: 500,
-  },
+  inputGroup: { marginBottom: 20 },
+  label: { display: 'block', marginBottom: 6, fontWeight: 500, color: '#2C3E50' },
   input: {
     width: '100%',
-    padding: '14px 16px',
-    fontSize: '16px',
+    padding: 14,
     border: '1px solid #ddd',
-    borderRadius: '12px',
-    outline: 'none',
-    boxSizing: 'border-box',
-  },
-  buttonGroup: {
-    display: 'flex',
-    gap: '12px',
-    marginTop: '30px',
-  },
-  saveButton: {
-    flex: 1,
-    padding: '14px',
-    backgroundColor: '#0084ff',
-    color: 'white',
-    border: 'none',
-    borderRadius: '12px',
-    fontSize: '16px',
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  cancelButton: {
-    flex: 1,
-    padding: '14px',
-    backgroundColor: '#e4e6eb',
-    color: '#1a1a1a',
-    border: 'none',
-    borderRadius: '12px',
-    fontSize: '16px',
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  logoutButton: {
-    width: '100%',
-    padding: '14px',
-    marginTop: '20px',
-    backgroundColor: '#ff4d4f',
-    color: 'white',
-    border: 'none',
-    borderRadius: '12px',
-    fontSize: '16px',
-    fontWeight: 600,
-    cursor: 'pointer',
+    borderRadius: 40,
+    fontSize: 16,
+    backgroundColor: 'white',
   },
   themeToggle: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: '20px',
-  },
-  themeLabel: {
-    color: '#555',
-    fontWeight: 500,
+    marginBottom: 20,
   },
   themeButton: {
-    padding: '8px 16px',
-    backgroundColor: '#e4e6eb',
+    padding: '10px 20px',
+    backgroundColor: '#2C3E50',
+    color: 'white',
     border: 'none',
-    borderRadius: '20px',
+    borderRadius: 30,
     cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: 500,
+  },
+  buttonGroup: { display: 'flex', gap: 12, marginTop: 30 },
+  saveButton: {
+    flex: 1,
+    padding: 14,
+    backgroundColor: '#0084ff',
+    color: 'white',
+    border: 'none',
+    borderRadius: 40,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+  cancelButton: {
+    flex: 1,
+    padding: 14,
+    backgroundColor: '#e0e0e0',
+    color: '#333',
+    border: 'none',
+    borderRadius: 40,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+  logoutButton: {
+    width: '100%',
+    padding: 14,
+    marginTop: 20,
+    backgroundColor: '#ff4d4f',
+    color: 'white',
+    border: 'none',
+    borderRadius: 40,
+    fontWeight: 600,
+    cursor: 'pointer',
   },
 };
 
@@ -143,7 +124,6 @@ export default function Settings() {
     }
     const savedAvatar = localStorage.getItem('avatar');
     if (savedAvatar) setAvatar(savedAvatar);
-
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark';
     if (savedTheme) setTheme(savedTheme);
   }, []);
@@ -183,63 +163,35 @@ export default function Settings() {
   };
 
   return (
-    <div style={styles.container}>
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} style={styles.container}>
       <div style={styles.card}>
         <h2 style={styles.title}>⚙️ Настройки</h2>
 
         <div style={styles.avatarSection}>
-          <img
-            src={avatar || 'https://via.placeholder.com/100?text=Avatar'}
-            style={styles.avatar}
-            alt="Аватар"
-          />
+          <img src={avatar || 'https://via.placeholder.com/100?text=CBEF'} style={styles.avatar} alt="Аватар" />
           <div>
-            <input
-              type="file"
-              accept="image/*"
-              id="avatarUpload"
-              style={styles.fileInput}
-              onChange={handleAvatarChange}
-            />
-            <label htmlFor="avatarUpload" style={styles.uploadButton}>
-              Загрузить фото
-            </label>
-            <p style={{ fontSize: 12, color: '#888', marginTop: 8 }}>
-              JPG, PNG (сохраняется локально)
-            </p>
+            <input type="file" accept="image/*" id="avatarUpload" style={styles.fileInput} onChange={handleAvatarChange} />
+            <label htmlFor="avatarUpload" style={styles.uploadButton}>Загрузить фото</label>
           </div>
         </div>
 
         <div style={styles.inputGroup}>
           <label style={styles.label}>Имя пользователя</label>
-          <input
-            style={styles.input}
-            value={username}
-            onChange={e => setUsername(e.target.value)}
-            placeholder="Ваше имя"
-          />
+          <input style={styles.input} value={username} onChange={e => setUsername(e.target.value)} />
         </div>
 
         <div style={styles.themeToggle}>
-          <span style={styles.themeLabel}>Тема оформления</span>
-          <button style={styles.themeButton} onClick={toggleTheme}>
-            {theme === 'light' ? '☀️ Светлая' : '🌙 Тёмная'}
-          </button>
+          <span>Тема</span>
+          <button style={styles.themeButton} onClick={toggleTheme}>{theme === 'light' ? '☀️ Светлая' : '🌙 Тёмная'}</button>
         </div>
 
         <div style={styles.buttonGroup}>
-          <button style={styles.saveButton} onClick={handleSave}>
-            Сохранить
-          </button>
-          <button style={styles.cancelButton} onClick={() => navigate('/chat')}>
-            Отмена
-          </button>
+          <button style={styles.saveButton} onClick={handleSave}>Сохранить</button>
+          <button style={styles.cancelButton} onClick={() => navigate('/chat')}>Отмена</button>
         </div>
 
-        <button style={styles.logoutButton} onClick={handleLogout}>
-          Выйти из аккаунта
-        </button>
+        <button style={styles.logoutButton} onClick={handleLogout}>Выйти</button>
       </div>
-    </div>
+    </motion.div>
   );
 }

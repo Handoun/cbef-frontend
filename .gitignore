@@ -7,3 +7,4 @@ electron/
 "electron/node_modules/" 
 "electron/release/" 
 "electron/node_modules/" 
+.vercel
