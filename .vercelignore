@@ -1,3 +1,5 @@
-echo electron/ > .vercelignore
-echo android/ >> .vercelignore
-echo node_modules/ >> .vercelignore
+electron/
+android/
+ios/
+node_modules/
+.git/

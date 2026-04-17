@@ -1,20 +1,31 @@
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import Login from './components/Login';
-import Register from './components/Register';
-import Chat from './components/Chat';
-import Settings from './components/Settings';
+import { lazy, Suspense, useEffect, useState } from 'react';
+
+const Login = lazy(() => import('./components/Login'));
+const Register = lazy(() => import('./components/Register'));
+const Chat = lazy(() => import('./components/Chat'));
+const Settings = lazy(() => import('./components/Settings'));
 
 function App() {
-  const token = localStorage.getItem('token');
+  const [isAuth, setIsAuth] = useState<boolean>(() => !!localStorage.getItem('token'));
+
+  useEffect(() => {
+    const handleStorage = () => setIsAuth(!!localStorage.getItem('token'));
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
   return (
     <HashRouter>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/chat" element={token ? <Chat /> : <Navigate to="/login" />} />
-        <Route path="/settings" element={token ? <Settings /> : <Navigate to="/login" />} />
-        <Route path="*" element={<Navigate to="/login" />} />
-      </Routes>
+      <Suspense fallback={<div className="loading-screen">Загрузка...</div>}>
+        <Routes>
+          <Route path="/login" element={<Login onLogin={() => setIsAuth(true)} />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/chat" element={isAuth ? <Chat /> : <Navigate to="/login" replace />} />
+          <Route path="/settings" element={isAuth ? <Settings /> : <Navigate to="/login" replace />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </Suspense>
     </HashRouter>
   );
 }

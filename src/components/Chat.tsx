@@ -4,6 +4,9 @@ import axios from 'axios';
 import { Peer } from 'peerjs';
 import EmojiPicker from 'emoji-picker-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import SearchBar from './SearchBar';
+import FriendRequests from './FriendRequests';
+import CallWindow from './CallWindow';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL;
@@ -11,7 +14,6 @@ const PEER_HOST = import.meta.env.VITE_PEER_HOST;
 const PEER_PORT = import.meta.env.VITE_PEER_PORT;
 const PEER_PATH = import.meta.env.VITE_PEER_PATH;
 
-// Стили с поддержкой CSS-переменных и адаптивностью
 const styles: { [key: string]: React.CSSProperties & { [key: string]: any } } = {
   container: {
     display: 'flex',
@@ -146,6 +148,7 @@ const styles: { [key: string]: React.CSSProperties & { [key: string]: any } } = 
   },
   messageRow: {
     display: 'flex',
+    alignItems: 'flex-end',
   },
   messageBubble: {
     maxWidth: '75%',
@@ -206,54 +209,6 @@ const styles: { [key: string]: React.CSSProperties & { [key: string]: any } } = 
     fontSize: '16px',
     backgroundColor: 'var(--chat-bg)',
   },
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1000,
-    backdropFilter: 'blur(4px)',
-  },
-  modalBox: {
-    backgroundColor: 'var(--sidebar-bg)',
-    padding: '30px 40px',
-    borderRadius: '24px',
-    textAlign: 'center',
-    boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
-    color: 'var(--text-primary)',
-    maxWidth: '90%',
-  },
-  modalTitle: {
-    margin: '0 0 16px 0',
-    fontSize: '24px',
-    fontWeight: 600,
-  },
-  modalText: {
-    margin: '0 0 24px 0',
-    color: 'var(--text-secondary)',
-  },
-  modalButton: {
-    margin: '0 8px',
-    padding: '12px 28px',
-    fontSize: '16px',
-    borderRadius: '40px',
-    border: 'none',
-    cursor: 'pointer',
-    fontWeight: 600,
-  },
-  acceptButton: {
-    backgroundColor: '#0084ff',
-    color: '#fff',
-  },
-  declineButton: {
-    backgroundColor: 'var(--button-bg)',
-    color: 'var(--button-text)',
-  },
   iconButton: {
     background: 'none',
     border: 'none',
@@ -297,10 +252,14 @@ const styles: { [key: string]: React.CSSProperties & { [key: string]: any } } = 
     color: 'var(--text-secondary)',
     display: 'none',
   },
-  // Медиа-запросы будут обрабатываться через JS (см. логику адаптивности)
 };
 
-interface User { id: number; username: string; }
+interface User {
+  id: number;
+  username: string;
+  avatar?: string;
+}
+
 interface Message {
   id: number;
   sender_id: number;
@@ -322,6 +281,7 @@ export default function Chat() {
   const [peer, setPeer] = useState<Peer | null>(null);
   const [currentCall, setCurrentCall] = useState<any>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [incomingCall, setIncomingCall] = useState<{ call: any; from: string } | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -333,6 +293,10 @@ export default function Chat() {
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [showSearch, setShowSearch] = useState(false);
+  const [refreshContacts, setRefreshContacts] = useState(0);
+  const [videoEnabled, setVideoEnabled] = useState(true);
+  const [audioEnabled, setAudioEnabled] = useState(true);
 
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
   const token = localStorage.getItem('token');
@@ -363,14 +327,14 @@ export default function Chat() {
     setShowSidebar(true);
   };
 
-  // Загрузка данных
+  // Загрузка контактов (друзей) – теперь через API контактов (которые пополняются после принятия заявок)
   useEffect(() => {
     if (!token) return;
     axios.get(`${API_URL}/api/users`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => setUsers(res.data)).catch(console.error);
     axios.get(`${API_URL}/api/contacts`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => setContacts(res.data)).catch(console.error);
-  }, [token]);
+  }, [token, refreshContacts]);
 
   // Socket.IO
   useEffect(() => {
@@ -384,6 +348,14 @@ export default function Chat() {
     });
     newSocket.on('user_status', ({ userId, online }: { userId: number, online: boolean }) => {
       setOnlineUsers(prev => { const next = new Set(prev); online ? next.add(userId) : next.delete(userId); return next; });
+    });
+    newSocket.on('friend_request', ({ fromId, fromName }: { fromId: number; fromName: string }) => {
+      alert(`Новая заявка в друзья от ${fromName}`);
+      setRefreshContacts(prev => prev + 1);
+    });
+    newSocket.on('friend_request_accepted', ({ byId, byName }: { byId: number; byName: string }) => {
+      alert(`${byName} принял(а) вашу заявку!`);
+      setRefreshContacts(prev => prev + 1);
     });
     return () => { newSocket.disconnect(); };
   }, [token, currentUser.id, selectedUser]);
@@ -421,32 +393,30 @@ export default function Chat() {
   const startCall = async () => {
     if (!selectedUser || !peer) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
       setLocalStream(stream);
+      setAudioEnabled(true);
+      setVideoEnabled(true);
       const call = peer.call(selectedUser.id.toString(), stream);
       setCurrentCall(call);
       call.on('stream', (remoteStream: MediaStream) => {
-        if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = remoteStream;
-          remoteAudioRef.current.play().catch(console.error);
-        }
+        setRemoteStream(remoteStream);
       });
       call.on('close', () => { setCurrentCall(null); stopLocalStream(); });
-    } catch (err) { alert('Не удалось начать звонок. Проверьте микрофон.'); }
+    } catch (err) { alert('Не удалось начать звонок. Проверьте микрофон и камеру.'); }
   };
 
   const acceptCall = async () => {
     if (!incomingCall) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
       setLocalStream(stream);
+      setAudioEnabled(true);
+      setVideoEnabled(true);
       incomingCall.call.answer(stream);
       setCurrentCall(incomingCall.call);
       incomingCall.call.on('stream', (remoteStream: MediaStream) => {
-        if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = remoteStream;
-          remoteAudioRef.current.play().catch(console.error);
-        }
+        setRemoteStream(remoteStream);
       });
       incomingCall.call.on('close', () => { setCurrentCall(null); stopLocalStream(); });
       setIncomingCall(null);
@@ -457,7 +427,7 @@ export default function Chat() {
   const hangUp = () => { if (currentCall) { currentCall.close(); setCurrentCall(null); } stopLocalStream(); };
   const stopLocalStream = () => {
     if (localStream) { localStream.getTracks().forEach(t => t.stop()); setLocalStream(null); }
-    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+    setRemoteStream(null);
   };
 
   const addContact = (userId: number) => {
@@ -497,22 +467,50 @@ export default function Chat() {
   const stickers = ['😊', '😂', '😍', '👍', '🎉', '🔥', '❤️', '💯'];
   const sendSticker = (sticker: string) => { setInput(sticker); sendMessage(); setShowStickers(false); };
 
-  const displayedContacts = contacts.length ? contacts : users.filter(u => u.id !== currentUser.id);
+  const displayedContacts = contacts; // теперь показываем только друзей (контакты)
 
   return (
     <div style={styles.container}>
-      <AnimatePresence>
-        {incomingCall && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={styles.modalOverlay}>
-            <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }} style={styles.modalBox}>
-              <h3 style={styles.modalTitle}>📞 Входящий звонок</h3>
-              <p style={styles.modalText}>Пользователь ID: {incomingCall.from}</p>
-              <button style={{ ...styles.modalButton, ...styles.acceptButton }} onClick={acceptCall}>Принять</button>
-              <button style={{ ...styles.modalButton, ...styles.declineButton }} onClick={declineCall}>Отклонить</button>
-            </motion.div>
+      {incomingCall && !currentCall && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }} style={{
+            background: 'var(--sidebar-bg)', padding: 30, borderRadius: 24,
+            textAlign: 'center',
+          }}>
+            <h3>📞 Входящий звонок</h3>
+            <p>{incomingCall.from}</p>
+            <button onClick={acceptCall} style={{ marginRight: 16, padding: '10px 24px', borderRadius: 40, background: '#4caf50', color: 'white', border: 'none' }}>Принять</button>
+            <button onClick={declineCall} style={{ padding: '10px 24px', borderRadius: 40, background: '#f44336', color: 'white', border: 'none' }}>Отклонить</button>
           </motion.div>
-        )}
-      </AnimatePresence>
+        </motion.div>
+      )}
+
+      {currentCall && (
+        <CallWindow
+          localStream={localStream}
+          remoteStream={remoteStream}
+          onHangUp={hangUp}
+          onToggleAudio={() => {
+            if (localStream) {
+              localStream.getAudioTracks().forEach(t => t.enabled = !t.enabled);
+              setAudioEnabled(prev => !prev);
+            }
+          }}
+          onToggleVideo={() => {
+            if (localStream) {
+              localStream.getVideoTracks().forEach(t => t.enabled = !t.enabled);
+              setVideoEnabled(prev => !prev);
+            }
+          }}
+          audioEnabled={audioEnabled}
+          videoEnabled={videoEnabled}
+        />
+      )}
 
       {/* Боковая панель */}
       {(showSidebar || !isMobile) && (
@@ -526,12 +524,16 @@ export default function Chat() {
           }}
         >
           <div style={styles.sidebarHeader}>
-            <h2 style={styles.sidebarTitle}>💬 CBEF</h2>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h2 style={styles.sidebarTitle}>💬 CBEF</h2>
+              <button onClick={() => setShowSearch(true)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer' }}>🔍</button>
+            </div>
             <p style={{ margin: '4px 0 0', fontSize: 14, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
               <span>{currentUser.username}</span>
-              <button onClick={() => window.location.hash = '#/settings'} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: 'var(--text-secondary)' }}>⚙️</button>
+              <button onClick={() => window.location.hash = '#/settings'} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--text-secondary)' }}>⚙️</button>
             </p>
           </div>
+          <FriendRequests token={token!} onAccept={() => setRefreshContacts(prev => prev + 1)} />
           <div style={styles.contactList}>
             {displayedContacts.map(user => (
               <div
@@ -541,11 +543,9 @@ export default function Chat() {
               >
                 <div style={styles.contactInfo}>
                   <span style={onlineUsers.has(user.id) ? styles.onlineDot : styles.offlineDot} />
+                  <img src={user.avatar || 'https://via.placeholder.com/40?text=?'} style={{ width: 40, height: 40, borderRadius: '50%' }} />
                   <span style={styles.contactName}>{user.username}</span>
                 </div>
-                {!contacts.some(c => c.id === user.id) && (
-                  <button style={styles.addButton} onClick={(e) => { e.stopPropagation(); addContact(user.id); }}>+</button>
-                )}
               </div>
             ))}
           </div>
@@ -573,7 +573,7 @@ export default function Chat() {
               </div>
               <div>
                 {!currentCall ? (
-                  <button style={styles.callButton} onClick={startCall}>📞 Позвонить</button>
+                  <button style={styles.callButton} onClick={startCall}>📞 Видеозвонок</button>
                 ) : (
                   <button style={styles.hangUpButton} onClick={hangUp}>❌ Завершить</button>
                 )}
@@ -590,6 +590,12 @@ export default function Chat() {
                     transition={{ duration: 0.2 }}
                     style={{ ...styles.messageRow, justifyContent: msg.sender_id === currentUser.id ? 'flex-end' : 'flex-start' }}
                   >
+                    {msg.sender_id !== currentUser.id && (
+                      <img
+                        src={selectedUser.avatar || 'https://via.placeholder.com/32?text=?'}
+                        style={{ width: 32, height: 32, borderRadius: '50%', marginRight: 8 }}
+                      />
+                    )}
                     <div style={{ ...styles.messageBubble, ...(msg.sender_id === currentUser.id ? styles.messageOwn : styles.messageOther) }}>
                       {msg.image && <img src={msg.image} alt="sent" style={{ maxWidth: '100%', borderRadius: 12, marginBottom: 4 }} />}
                       {msg.audio && <audio controls src={msg.audio} style={{ maxWidth: 200 }} />}
@@ -637,6 +643,8 @@ export default function Chat() {
         )}
       </div>
       <audio ref={remoteAudioRef} autoPlay />
+
+      {showSearch && <SearchBar token={token!} onClose={() => setShowSearch(false)} />}
     </div>
   );
 }
