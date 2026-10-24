@@ -39,6 +39,10 @@ export default function CallWindow({
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const [seconds, setSeconds] = useState(0);
 
+  const hasRemoteVideo = Boolean(
+    remoteStream && remoteStream.getVideoTracks().some(t => t.enabled && t.readyState === 'live')
+  );
+
   useEffect(() => {
     const interval = setInterval(() => {
       setSeconds(s => s + 1);
@@ -83,8 +87,6 @@ export default function CallWindow({
       screenVideoRef.current.srcObject = screenStream;
     }
   }, [screenStream]);
-
-  const hasRemoteVideo = remoteStream && remoteStream.getVideoTracks().some(t => t.enabled && t.readyState === 'live');
 
   return (
     <motion.div

@@ -1491,7 +1491,7 @@ export default function Chat() {
                           />
                         )}
                         {msg.audio && <audio controls src={msg.audio} style={{ width: '220px', marginBottom: 4 }} />}
-                        {msg.text.startsWith('📞') || msg.text.startsWith('❌') || msg.text.startsWith('🚫') ? (
+                        {msg.text && (msg.text.startsWith('📞') || msg.text.startsWith('❌') || msg.text.startsWith('🚫')) ? (
                           <div
                             style={{
                               display: 'flex',
@@ -1561,9 +1561,9 @@ export default function Chat() {
                               </div>
                             )}
                           </div>
-                        ) : (
+                        ) : msg.text ? (
                           <div>{msg.text}</div>
-                        )}
+                        ) : null}
                         <div
                           style={{
                             fontSize: 11,
