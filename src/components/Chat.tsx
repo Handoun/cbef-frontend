@@ -270,7 +270,7 @@ export default function Chat() {
   // Socket.IO
   useEffect(() => {
     if (!token) return;
-    const newSocket = io(SOCKET_URL, { auth: { token }, transports: ['polling', 'websocket'] });
+    const newSocket = io(SOCKET_URL, { auth: { token }, transports: ['websocket', 'polling'] });
     setSocket(newSocket);
 
     newSocket.on('connect', () => console.log('Socket connected'));
@@ -409,11 +409,15 @@ export default function Chat() {
       secure: window.location.protocol === 'https:',
       config: {
         iceServers: [
+          { urls: 'stun:87.120.165.116:3478' },
+          {
+            urls: 'turn:87.120.165.116:3478',
+            username: 'cbefuser',
+            credential: 'cbefpass2025',
+          },
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
           { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' },
         ],
       },
     });
@@ -439,7 +443,9 @@ export default function Chat() {
         currentCallRef.current = call;
 
         call.on('stream', (rs: MediaStream) => {
-          console.log('✅ Remote stream received in late-arrival answer');
+          console.log('✅ Remote stream received in late-arrival answer', rs.getTracks());
+          rs.getAudioTracks().forEach(t => (t.enabled = true));
+          callAnsweredTimeRef.current = Date.now();
           ringtone.stop();
           setRemoteStream(rs);
         });
@@ -586,7 +592,8 @@ export default function Chat() {
           currentCallRef.current = call;
 
           call.on('stream', (rs: MediaStream) => {
-            console.log('✅ Remote stream received in caller');
+            console.log('✅ Remote stream received in caller', rs.getTracks());
+            rs.getAudioTracks().forEach(t => (t.enabled = true));
             callAnsweredTimeRef.current = Date.now();
             ringtone.stop();
             setRemoteStream(rs);
@@ -657,7 +664,8 @@ export default function Chat() {
         currentCallRef.current = callToAnswer;
 
         callToAnswer.on('stream', (rs: MediaStream) => {
-          console.log('✅ Remote stream received in receiver');
+          console.log('✅ Remote stream received in receiver', rs.getTracks());
+          rs.getAudioTracks().forEach(t => (t.enabled = true));
           callAnsweredTimeRef.current = Date.now();
           ringtone.stop();
           setRemoteStream(rs);

@@ -65,6 +65,8 @@ export default function CallWindow({
   useEffect(() => {
     if (remoteAudioRef.current && remoteStream) {
       remoteAudioRef.current.srcObject = remoteStream;
+      remoteAudioRef.current.muted = false;
+      remoteAudioRef.current.volume = 1.0;
       const p = remoteAudioRef.current.play();
       if (p !== undefined) {
         p.catch(err => console.warn('remoteAudioRef autoPlay blocked:', err));
@@ -159,6 +161,7 @@ export default function CallWindow({
             ref={remoteVideoRef}
             autoPlay
             playsInline
+            muted
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           />
         ) : (
@@ -291,8 +294,21 @@ export default function CallWindow({
           📞
         </button>
       </div>
-      {/* Всегда активный скрытый аудио элемент для проигрывания звука собеседника */}
-      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
+      {/* Всегда активный аудио элемент для чистого проигрывания звука собеседника */}
+      <audio
+        ref={remoteAudioRef}
+        autoPlay
+        playsInline
+        style={{
+          position: 'fixed',
+          top: -9999,
+          left: -9999,
+          width: 1,
+          height: 1,
+          opacity: 0.01,
+          pointerEvents: 'none',
+        }}
+      />
     </motion.div>
   );
 }
