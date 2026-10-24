@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import axios from 'axios';
-import { Peer } from 'peerjs';
 import EmojiPicker from 'emoji-picker-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -22,9 +21,20 @@ import { ringtone } from '../utils/ringtone';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL;
-const PEER_HOST = import.meta.env.VITE_PEER_HOST;
-const PEER_PORT = import.meta.env.VITE_PEER_PORT;
-const PEER_PATH = import.meta.env.VITE_PEER_PATH;
+
+const ICE_CONFIG: RTCConfiguration = {
+  iceServers: [
+    { urls: 'stun:87.120.165.116:3478' },
+    {
+      urls: 'turn:87.120.165.116:3478',
+      username: 'cbefuser',
+      credential: 'cbefpass2025',
+    },
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+  ],
+};
 
 interface User {
   id: number;
@@ -71,27 +81,27 @@ export default function Chat() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [onlineUsers, setOnlineUsers] = useState<Set<number>>(new Set());
 
-  // Calls
-  const [peer, setPeer] = useState<Peer | null>(null);
+  // Native WebRTC Calls State
   const [currentCall, setCurrentCall] = useState<any>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+
   interface IncomingCallState {
-  call: any | null;
-  from: string;
-  callerName?: string;
-  callerAvatar?: string;
-  isVideo?: boolean;
-}
+    from: string;
+    callerName?: string;
+    callerAvatar?: string;
+    isVideo?: boolean;
+    offer?: any;
+  }
 
   const [incomingCall, setIncomingCall] = useState<IncomingCallState | null>(null);
   const currentCallRef = useRef<any>(null);
-  const pendingCallRef = useRef<any>(null);
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
+  const queuedIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
-  const peerRef = useRef<Peer | null>(null);
   const activeCallPartnerIdRef = useRef<number | null>(null);
-  const answeringStreamRef = useRef<MediaStream | null>(null);
   const incomingCallTargetRef = useRef<number | null>(null);
   const callStartTimeRef = useRef<number | null>(null);
   const callAnsweredTimeRef = useRef<number | null>(null);
@@ -103,6 +113,7 @@ export default function Chat() {
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
+  const [callPartnerInfo, setCallPartnerInfo] = useState<{ name: string; avatar?: string } | null>(null);
 
   // Audio elements
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
@@ -211,16 +222,17 @@ export default function Chat() {
     if (callAnsweredTimeRef.current || (durationSeconds && durationSeconds > 0)) {
       recordCallMessage('answered', durationSeconds);
     }
-    if (currentCallRef.current && typeof currentCallRef.current.close === 'function') {
+    if (peerConnectionRef.current) {
       try {
-        currentCallRef.current.close();
+        peerConnectionRef.current.close();
       } catch (e) {
-        console.warn('Error closing currentCall', e);
+        console.warn('Error closing peerConnection', e);
       }
+      peerConnectionRef.current = null;
     }
     currentCallRef.current = null;
-    pendingCallRef.current = null;
-    answeringStreamRef.current = null;
+    pendingOfferRef.current = null;
+    queuedIceCandidatesRef.current = [];
     activeCallPartnerIdRef.current = null;
     incomingCallTargetRef.current = null;
 
@@ -243,6 +255,7 @@ export default function Chat() {
     setRemoteStream(null);
     setCurrentCall(null);
     setIncomingCall(null);
+    setCallPartnerInfo(null);
   };
 
   // Reset messages when switching chat
@@ -332,8 +345,8 @@ export default function Chat() {
       alert('Ваш аккаунт заблокирован администратором.');
     });
 
-    newSocket.on('incoming_call', ({ from, callerName, callerAvatar, isVideo }: any) => {
-      console.log('📞 incoming_call socket event:', { from, callerName, isVideo });
+    newSocket.on('incoming_call', ({ from, callerName, callerAvatar, isVideo, offer }: any) => {
+      console.log('📞 incoming_call event:', { from, callerName, isVideo });
       const fromStr = from.toString();
       const fromId = parseInt(fromStr);
       incomingCallTargetRef.current = fromId;
@@ -344,16 +357,19 @@ export default function Chat() {
       callInitiatorIdRef.current = fromId;
       callTypeRef.current = isVideo ? 'video' : 'audio';
       hasRecordedCallRef.current = false;
+      if (offer) {
+        pendingOfferRef.current = offer;
+      }
 
-      setIncomingCall(prev => ({
-        ...prev,
+      setIncomingCall({
         from: fromStr,
         callerName: callerName || 'Пользователь',
         callerAvatar: callerAvatar || undefined,
         isVideo: isVideo !== false,
-        call: prev?.call || pendingCallRef.current || null,
-      }));
+        offer,
+      });
       setIsVideoCall(isVideo !== false);
+      setCallPartnerInfo({ name: callerName || "Пользователь", avatar: callerAvatar || undefined });
       ringtone.startIncomingRingtone();
 
       if (typeof Notification !== 'undefined') {
@@ -367,6 +383,39 @@ export default function Chat() {
               new Notification(title, { body, icon: callerAvatar || undefined, tag: 'cbef_call' });
             }
           });
+        }
+      }
+    });
+
+    newSocket.on('webrtc_signal', async ({ from, signal }: any) => {
+      console.log('📡 webrtc_signal received:', signal?.type, 'from:', from);
+      const pc = peerConnectionRef.current;
+
+      if (signal?.type === 'offer') {
+        pendingOfferRef.current = signal.offer;
+      } else if (signal?.type === 'answer') {
+        ringtone.stop();
+        callAnsweredTimeRef.current = Date.now();
+        if (pc) {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
+            while (queuedIceCandidatesRef.current.length > 0) {
+              const cand = queuedIceCandidatesRef.current.shift()!;
+              await pc.addIceCandidate(new RTCIceCandidate(cand));
+            }
+          } catch (e) {
+            console.error('Error setting remote answer:', e);
+          }
+        }
+      } else if (signal?.type === 'candidate' && signal.candidate) {
+        if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+          } catch (e) {
+            console.error('Error adding ICE candidate:', e);
+          }
+        } else {
+          queuedIceCandidatesRef.current.push(signal.candidate);
         }
       }
     });
@@ -399,88 +448,7 @@ export default function Chat() {
     };
   }, [token, currentUser.id, selectedUser, selectedGroup, selectedChannel, navigate]);
 
-  // PeerJS calls setup with STUN servers and race-condition prevention
-  useEffect(() => {
-    if (!currentUser.id) return;
-    const newPeer = new Peer(currentUser.id.toString(), {
-      host: PEER_HOST || window.location.hostname,
-      port: parseInt(PEER_PORT || (window.location.protocol === 'https:' ? '443' : '80')),
-      path: PEER_PATH || '/peerjs/myapp',
-      secure: window.location.protocol === 'https:',
-      config: {
-        iceServers: [
-          { urls: 'stun:87.120.165.116:3478' },
-          {
-            urls: 'turn:87.120.165.116:3478',
-            username: 'cbefuser',
-            credential: 'cbefpass2025',
-          },
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-        ],
-      },
-    });
-    setPeer(newPeer);
-    peerRef.current = newPeer;
 
-    newPeer.on('open', (id) => {
-      console.log('✅ PeerJS registered with ID:', id);
-    });
-
-    newPeer.on('call', call => {
-      console.log('📞 PeerJS call received from:', call.peer);
-      pendingCallRef.current = call;
-      incomingCallTargetRef.current = parseInt(call.peer);
-      activeCallPartnerIdRef.current = parseInt(call.peer);
-
-      // If user already clicked "Accept" before peer call arrived:
-      if (answeringStreamRef.current) {
-        const stream = answeringStreamRef.current;
-        answeringStreamRef.current = null;
-        call.answer(stream);
-        setCurrentCall(call);
-        currentCallRef.current = call;
-
-        call.on('stream', (rs: MediaStream) => {
-          console.log('✅ Remote stream received in late-arrival answer', rs.getTracks());
-          rs.getAudioTracks().forEach(t => (t.enabled = true));
-          callAnsweredTimeRef.current = Date.now();
-          ringtone.stop();
-          setRemoteStream(rs);
-        });
-        call.on('close', () => endCallCleanup());
-        call.on('error', (err: any) => {
-          console.error('Peer call error:', err);
-          endCallCleanup();
-        });
-        return;
-      }
-
-      setIncomingCall(prev => ({
-        ...prev,
-        call: call,
-        from: call.peer,
-      }));
-      ringtone.startIncomingRingtone();
-
-      call.on('close', () => endCallCleanup());
-      call.on('error', (err: any) => {
-        console.error('Incoming peer call error:', err);
-        endCallCleanup();
-      });
-    });
-
-    newPeer.on('error', err => {
-      console.error('❌ PeerJS error:', err);
-    });
-
-    return () => {
-      ringtone.stop();
-      newPeer.destroy();
-      peerRef.current = null;
-    };
-  }, [currentUser.id]);
 
   // Load chat messages
   useEffect(() => {
@@ -538,9 +506,48 @@ export default function Chat() {
     setTtl(0);
   };
 
-  // Calling functions
+  // Native WebRTC Calling Implementation
+  const createPeerConnection = (partnerId: number): RTCPeerConnection => {
+    if (peerConnectionRef.current) {
+      try { peerConnectionRef.current.close(); } catch {}
+    }
+    queuedIceCandidatesRef.current = [];
+
+    const pc = new RTCPeerConnection(ICE_CONFIG);
+    peerConnectionRef.current = pc;
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate && socket) {
+        socket.emit('webrtc_signal', {
+          to: partnerId,
+          signal: { type: 'candidate', candidate: event.candidate.toJSON() },
+        });
+      }
+    };
+
+    pc.ontrack = (event) => {
+      console.log('✅ Remote WebRTC track arrived:', event.track.kind);
+      event.track.enabled = true;
+      const stream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
+      stream.getAudioTracks().forEach(t => (t.enabled = true));
+      stream.getVideoTracks().forEach(t => (t.enabled = true));
+      setRemoteStream(stream);
+      callAnsweredTimeRef.current = Date.now();
+      ringtone.stop();
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log('WebRTC connection state:', pc.connectionState);
+      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        endCallCleanup();
+      }
+    };
+
+    return pc;
+  };
+
   const startCall = async (video: boolean) => {
-    if (!selectedUser) return;
+    if (!selectedUser || !socket) return;
     setIsVideoCall(video);
     activeCallPartnerIdRef.current = selectedUser.id;
     callStartTimeRef.current = Date.now();
@@ -549,6 +556,7 @@ export default function Chat() {
     callInitiatorIdRef.current = currentUser.id;
     callTypeRef.current = video ? 'video' : 'audio';
     hasRecordedCallRef.current = false;
+    setCallPartnerInfo({ name: selectedUser.username, avatar: selectedUser.avatar });
     ringtone.startOutgoingRingback();
 
     let stream: MediaStream | null = null;
@@ -574,66 +582,45 @@ export default function Chat() {
       setVideoEnabled(video && stream.getVideoTracks().length > 0);
     }
 
-    if (socket) {
+    const pc = createPeerConnection(selectedUser.id);
+
+    if (stream) {
+      stream.getTracks().forEach(track => {
+        pc.addTrack(track, stream!);
+      });
+    }
+
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
       socket.emit('call_initiate', {
         to: selectedUser.id,
         isVideo: video,
         callerName: currentUser.username,
         callerAvatar: currentUser.avatar || localStorage.getItem('avatar'),
+        offer: { type: offer.type, sdp: offer.sdp },
       });
-    }
 
-    const peerInstance = peerRef.current || peer;
-    if (peerInstance) {
-      try {
-        const call = peerInstance.call(selectedUser.id.toString(), stream || undefined);
-        if (call) {
-          setCurrentCall(call);
-          currentCallRef.current = call;
-
-          call.on('stream', (rs: MediaStream) => {
-            console.log('✅ Remote stream received in caller', rs.getTracks());
-            rs.getAudioTracks().forEach(t => (t.enabled = true));
-            callAnsweredTimeRef.current = Date.now();
-            ringtone.stop();
-            setRemoteStream(rs);
-          });
-          call.on('close', () => {
-            endCallCleanup();
-          });
-          call.on('error', (err: any) => {
-            console.error('Call error in caller:', err);
-            endCallCleanup();
-          });
-        }
-      } catch (err) {
-        console.error('peer.call failed:', err);
-        endCallCleanup();
-        alert('Не удалось установить соединение для звонка.');
-      }
-    } else {
-      console.warn('Peer service not connected yet');
+      setCurrentCall({ id: 'outgoing', partnerId: selectedUser.id });
+    } catch (err) {
+      console.error('Failed to create offer:', err);
+      endCallCleanup();
+      alert('Ошибка при начале звонка.');
     }
   };
 
   const acceptCall = async () => {
     ringtone.stop();
     callAnsweredTimeRef.current = Date.now();
-    const callToAnswer = incomingCall?.call || pendingCallRef.current;
-    const targetUserId = incomingCall?.from ? parseInt(incomingCall.from) : incomingCallTargetRef.current;
-
-    if (targetUserId) {
-      activeCallPartnerIdRef.current = targetUserId;
-      callPartnerIdRef.current = targetUserId;
+    const partnerId = incomingCall?.from ? parseInt(incomingCall.from) : activeCallPartnerIdRef.current;
+    if (!partnerId || !socket) {
+      setIncomingCall(null);
+      return;
     }
 
-    // Send accept signal via Socket.IO
-    if (socket && targetUserId) {
-      socket.emit('call_response', {
-        to: targetUserId,
-        accepted: true,
-      });
-    }
+    activeCallPartnerIdRef.current = partnerId;
+    callPartnerIdRef.current = partnerId;
 
     let stream: MediaStream | null = null;
     const wantVideo = isVideoCall;
@@ -657,35 +644,40 @@ export default function Chat() {
       setVideoEnabled(wantVideo && stream.getVideoTracks().length > 0);
     }
 
-    if (callToAnswer) {
-      try {
-        callToAnswer.answer(stream || undefined);
-        setCurrentCall(callToAnswer);
-        currentCallRef.current = callToAnswer;
+    const pc = createPeerConnection(partnerId);
 
-        callToAnswer.on('stream', (rs: MediaStream) => {
-          console.log('✅ Remote stream received in receiver', rs.getTracks());
-          rs.getAudioTracks().forEach(t => (t.enabled = true));
-          callAnsweredTimeRef.current = Date.now();
-          ringtone.stop();
-          setRemoteStream(rs);
-        });
+    if (stream) {
+      stream.getTracks().forEach(track => {
+        pc.addTrack(track, stream!);
+      });
+    }
 
-        callToAnswer.on('close', () => {
-          endCallCleanup();
-        });
-
-        callToAnswer.on('error', (err: any) => {
-          console.error('Call error in receiver:', err);
-          endCallCleanup();
-        });
-      } catch (err) {
-        console.error('Failed to answer call:', err);
+    try {
+      const offer = pendingOfferRef.current;
+      if (offer) {
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        while (queuedIceCandidatesRef.current.length > 0) {
+          const cand = queuedIceCandidatesRef.current.shift()!;
+          await pc.addIceCandidate(new RTCIceCandidate(cand));
+        }
       }
-    } else {
-      console.warn('Call object not yet ready when accepting, waiting for peer call event...');
-      answeringStreamRef.current = stream;
-      setCurrentCall({ id: 'incoming-connecting' });
+
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      socket.emit('webrtc_signal', {
+        to: partnerId,
+        signal: { type: 'answer', answer: { type: answer.type, sdp: answer.sdp } },
+      });
+
+      socket.emit('call_response', {
+        to: partnerId,
+        accepted: true,
+      });
+
+      setCurrentCall({ id: 'active', partnerId });
+    } catch (err) {
+      console.error('Failed to answer call:', err);
     }
 
     setIncomingCall(null);
@@ -694,16 +686,12 @@ export default function Chat() {
   const declineCall = () => {
     ringtone.stop();
     recordCallMessage('declined');
-    const targetId = incomingCall?.from ? parseInt(incomingCall.from) : incomingCallTargetRef.current;
+    const targetId = incomingCall?.from ? parseInt(incomingCall.from) : activeCallPartnerIdRef.current;
     if (socket && targetId) {
       socket.emit('call_response', {
         to: targetId,
         accepted: false,
       });
-    }
-    const callToClose = incomingCall?.call || pendingCallRef.current;
-    if (callToClose && typeof callToClose.close === 'function') {
-      try { callToClose.close(); } catch {}
     }
     endCallCleanup();
   };
@@ -734,13 +722,40 @@ export default function Chat() {
         st?.getTracks().forEach(t => t.stop());
         screenStreamRef.current = null;
         setScreenStream(null);
+
+        const pc = peerConnectionRef.current;
+        if (pc && localStreamRef.current) {
+          const videoTrack = localStreamRef.current.getVideoTracks()[0];
+          const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+          if (sender && videoTrack) {
+            sender.replaceTrack(videoTrack);
+          }
+        }
       } else {
         const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
         screenStreamRef.current = stream;
         setScreenStream(stream);
-        stream.getVideoTracks()[0].onended = () => {
+
+        const pc = peerConnectionRef.current;
+        const screenTrack = stream.getVideoTracks()[0];
+        if (pc && screenTrack) {
+          const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+          if (sender) {
+            sender.replaceTrack(screenTrack);
+          }
+        }
+
+        screenTrack.onended = () => {
           screenStreamRef.current = null;
           setScreenStream(null);
+          const p = peerConnectionRef.current;
+          if (p && localStreamRef.current) {
+            const videoTrack = localStreamRef.current.getVideoTracks()[0];
+            const sender = p.getSenders().find(s => s.track?.kind === 'video');
+            if (sender && videoTrack) {
+              sender.replaceTrack(videoTrack);
+            }
+          }
         };
       }
     } catch (err) {
@@ -954,18 +969,8 @@ export default function Chat() {
           videoEnabled={videoEnabled}
           screenStream={screenStream}
           localAvatar={currentUser.avatar || localStorage.getItem('avatar')}
-          remoteAvatar={
-            selectedUser?.avatar ||
-            users.find(u => u.id === activeCallPartnerIdRef.current)?.avatar ||
-            (incomingCall as any)?.callerAvatar ||
-            undefined
-          }
-          remoteName={
-            selectedUser?.username ||
-            users.find(u => u.id === activeCallPartnerIdRef.current)?.username ||
-            (incomingCall as any)?.callerName ||
-            'Собеседник'
-          }
+          remoteAvatar={callPartnerInfo?.avatar || selectedUser?.avatar || users.find(u => u.id === activeCallPartnerIdRef.current)?.avatar}
+          remoteName={callPartnerInfo?.name || selectedUser?.username || users.find(u => u.id === activeCallPartnerIdRef.current)?.username || 'Собеседник'}
           isVideoCall={isVideoCall}
         />
       )}
