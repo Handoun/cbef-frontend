@@ -470,13 +470,7 @@ export default function Chat() {
         callAnsweredTimeRef.current = Date.now();
         ringtone.stop();
         setCurrentCall({ id: 'active', partnerId: from });
-        // Guarantee partner has our offer
-        if (localOfferRef.current && newSocket) {
-          newSocket.emit('webrtc_signal', {
-            to: from,
-            signal: { type: 'offer', offer: localOfferRef.current },
-          });
-        }
+
       }
     });
 
@@ -556,8 +550,14 @@ export default function Chat() {
   // Native WebRTC Calling Implementation
   const handleRemoteOfferAndAnswer = async (pc: RTCPeerConnection, partnerId: number, offer: any) => {
     try {
+      if (!offer || !offer.sdp) return;
+      if (pc.remoteDescription && pc.remoteDescription.sdp === offer.sdp) {
+        console.log('Offer already applied, skipping duplicate');
+        return;
+      }
       if (pc.signalingState !== 'stable' && pc.signalingState !== 'have-local-offer') {
-        // Not in valid state for offer
+        console.warn('Cannot apply remote offer in signalingState:', pc.signalingState);
+        return;
       }
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       while (queuedIceCandidatesRef.current.length > 0) {
@@ -567,6 +567,10 @@ export default function Chat() {
         } catch (e) {
           console.warn('Error adding candidate:', e);
         }
+      }
+      if (pc.signalingState !== 'have-remote-offer') {
+        console.warn('Expected have-remote-offer, got:', pc.signalingState);
+        return;
       }
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -589,12 +593,7 @@ export default function Chat() {
 
     const pc = new RTCPeerConnection(ICE_CONFIG);
     peerConnectionRef.current = pc;
-    try {
-      pc.addTransceiver('audio', { direction: 'sendrecv' });
-      pc.addTransceiver('video', { direction: 'sendrecv' });
-    } catch (e) {
-      console.warn('Transceiver error:', e);
-    }
+
 
     pc.onicecandidate = (event) => {
       if (event.candidate && socket) {
@@ -701,7 +700,7 @@ export default function Chat() {
     try {
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
-        offerToReceiveVideo: video,
+        offerToReceiveVideo: true,
       });
       await pc.setLocalDescription(offer);
       localOfferRef.current = { type: offer.type, sdp: offer.sdp };

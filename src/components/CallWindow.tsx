@@ -161,7 +161,10 @@ export default function CallWindow({
     }
   }, [screenStream]);
 
-  const showVideoArea = Boolean(isRemoteScreenSharing || isRemoteCameraOn || (hasRemoteVideo && (isVideoCall || isRemoteCameraOn)));
+  const hasLiveVideoTrack = Boolean(
+    remoteStream && remoteStream.getVideoTracks().some(t => t.readyState === 'live')
+  );
+  const showVideoArea = Boolean((hasLiveVideoTrack && (isRemoteCameraOn || isVideoCall || hasRemoteVideo)) || isRemoteScreenSharing);
 
   return (
     <motion.div
