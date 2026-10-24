@@ -591,6 +591,10 @@ export default function Chat() {
   const filteredGroups = groups.filter(g => g.name.toLowerCase().includes(searchQuery.toLowerCase()));
   const filteredChannels = channels.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
+  const filteredOtherUsers = users
+    .filter(u => u.id !== currentUser.id && !contacts.some(c => c.id === u.id))
+    .filter(u => u.username.toLowerCase().includes(searchQuery.toLowerCase()));
+
   const hasChatSelected = !!(selectedUser || selectedGroup || selectedChannel);
 
   // Incoming caller lookup
@@ -770,6 +774,9 @@ export default function Chat() {
               <button onClick={() => setShowGroupCreator(true)} style={topIconBtn} title="Создать группу">
                 👥
               </button>
+              <button onClick={() => setShowChannelSearch(true)} style={topIconBtn} title="Поиск каналов">
+                🔍
+              </button>
               <button onClick={() => setShowChannelCreator(true)} style={topIconBtn} title="Создать канал">
                 📢
               </button>
@@ -900,6 +907,65 @@ export default function Chat() {
                 </div>
               );
             })}
+
+          {/* Другие пользователи платформы */}
+          {(activeTab === 'all' || activeTab === 'direct') && filteredOtherUsers.length > 0 && (
+            <div>
+              <div style={{ padding: '10px 18px 4px', fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                {contacts.length === 0 ? 'Все пользователи' : 'Другие пользователи'}
+              </div>
+              {filteredOtherUsers.map(user => {
+                const isSelected = selectedUser?.id === user.id;
+                const isOnline = onlineUsers.has(user.id);
+                return (
+                  <div
+                    key={`other-user-${user.id}`}
+                    onClick={() => {
+                      setSelectedUser(user);
+                      setSelectedGroup(null);
+                      setSelectedChannel(null);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '12px 18px',
+                      cursor: 'pointer',
+                      borderBottom: '1px solid var(--border-color)',
+                      backgroundColor: isSelected ? 'var(--active-chat-bg)' : 'transparent',
+                      transition: 'background-color 0.15s',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ position: 'relative' }}>
+                        <Avatar src={user.avatar} name={user.username} size={44} />
+                        <span
+                          style={{
+                            position: 'absolute',
+                            bottom: 0,
+                            right: 0,
+                            width: 12,
+                            height: 12,
+                            borderRadius: '50%',
+                            backgroundColor: isOnline ? '#22c55e' : '#94a3b8',
+                            border: '2px solid var(--sidebar-bg)',
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 15, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          {user.username} {(user.is_premium || user.premium) && '⭐'}
+                        </div>
+                        <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                          {isOnline ? 'в сети' : 'был(а) недавно'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Группы */}
           {(activeTab === 'all' || activeTab === 'groups') &&
@@ -1104,9 +1170,37 @@ export default function Chat() {
                 )}
 
                 {selectedChannel && (
-                  <button onClick={copyChannelInviteLink} title="Скопировать ссылку-приглашение" style={topIconBtn}>
-                    🔗
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await axios.post(`${API_URL}/api/channels/${selectedChannel.id}/subscribe`, {}, {
+                            headers: { Authorization: `Bearer ${token}` }
+                          });
+                          setRefreshContacts(p => p + 1);
+                          setChannelSubscribersCount(prev => prev + 1);
+                          alert('Вы успешно подписались на канал!');
+                        } catch {
+                          alert('Ошибка при подписке на канал');
+                        }
+                      }}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: 16,
+                        backgroundColor: '#22c55e',
+                        color: 'white',
+                        border: 'none',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Подписаться
+                    </button>
+                    <button onClick={copyChannelInviteLink} title="Скопировать ссылку-приглашение" style={topIconBtn}>
+                      🔗
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
