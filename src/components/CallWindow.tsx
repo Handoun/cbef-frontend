@@ -17,6 +17,7 @@ interface CallWindowProps {
   remoteName?: string;
   isVideoCall?: boolean;
   isRemoteScreenSharing?: boolean;
+  isRemoteCameraOn?: boolean;
 }
 
 export default function CallWindow({
@@ -34,6 +35,7 @@ export default function CallWindow({
   remoteName = 'Собеседник',
   isVideoCall = true,
   isRemoteScreenSharing = false,
+  isRemoteCameraOn = false,
 }: CallWindowProps) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -155,10 +157,11 @@ export default function CallWindow({
   useEffect(() => {
     if (screenVideoRef.current && screenStream) {
       screenVideoRef.current.srcObject = screenStream;
+      screenVideoRef.current.play().catch(() => {});
     }
   }, [screenStream]);
 
-  const showVideoArea = Boolean(hasRemoteVideo || isRemoteScreenSharing);
+  const showVideoArea = Boolean(isRemoteScreenSharing || isRemoteCameraOn || (hasRemoteVideo && (isVideoCall || isRemoteCameraOn)));
 
   return (
     <motion.div

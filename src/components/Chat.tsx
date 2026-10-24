@@ -136,6 +136,7 @@ export default function Chat() {
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [callPartnerInfo, setCallPartnerInfo] = useState<{ name: string; avatar?: string } | null>(null);
   const [isRemoteScreenSharing, setIsRemoteScreenSharing] = useState<boolean>(false);
+  const [isRemoteCameraOn, setIsRemoteCameraOn] = useState<boolean>(false);
 
   // Audio elements
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
@@ -278,6 +279,7 @@ export default function Chat() {
     setIncomingCall(null);
     setCallPartnerInfo(null);
     setIsRemoteScreenSharing(false);
+    setIsRemoteCameraOn(false);
   };
 
   // Reset messages when switching chat
@@ -391,6 +393,7 @@ export default function Chat() {
         offer,
       });
       setIsVideoCall(isVideo !== false);
+      setIsRemoteCameraOn(isVideo !== false);
       setCallPartnerInfo({ name: callerName || "Пользователь", avatar: callerAvatar || undefined });
       ringtone.startIncomingRingtone();
 
@@ -417,6 +420,9 @@ export default function Chat() {
       if (signal?.type === 'screen_share') {
         console.log('🖥️ Remote screen share signal:', signal.isSharing);
         setIsRemoteScreenSharing(Boolean(signal.isSharing));
+      } else if (signal?.type === 'camera_status') {
+        console.log('📷 Remote camera status signal:', signal.enabled);
+        setIsRemoteCameraOn(Boolean(signal.enabled));
       } else if (signal?.type === 'offer') {
         pendingOfferRef.current = signal.offer;
         if (callAcceptedRef.current && pc) {
@@ -583,6 +589,12 @@ export default function Chat() {
 
     const pc = new RTCPeerConnection(ICE_CONFIG);
     peerConnectionRef.current = pc;
+    try {
+      pc.addTransceiver('audio', { direction: 'sendrecv' });
+      pc.addTransceiver('video', { direction: 'sendrecv' });
+    } catch (e) {
+      console.warn('Transceiver error:', e);
+    }
 
     pc.onicecandidate = (event) => {
       if (event.candidate && socket) {
@@ -802,6 +814,75 @@ export default function Chat() {
 
   const stopLocalStream = () => {
     endCallCleanup();
+  };
+
+    const toggleVideo = async () => {
+    const targetId = activeCallPartnerIdRef.current || selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
+    const pc = peerConnectionRef.current;
+    let st = localStreamRef.current || localStream;
+
+    if (videoEnabled) {
+      // Turn camera OFF
+      if (st) {
+        st.getVideoTracks().forEach(t => {
+          t.enabled = false;
+          t.stop();
+          st!.removeTrack(t);
+        });
+      }
+      setVideoEnabled(false);
+      if (pc) {
+        const vSender = pc.getSenders().find(s => s.track?.kind === 'video' || (s.track === null));
+        if (vSender) {
+          try { await vSender.replaceTrack(null); } catch {}
+        }
+      }
+      if (socket && targetId) {
+        socket.emit('webrtc_signal', { to: targetId, signal: { type: 'camera_status', enabled: false } });
+      }
+    } else {
+      // Turn camera ON
+      try {
+        const newStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user' },
+          audio: false,
+        });
+        const newVideoTrack = newStream.getVideoTracks()[0];
+        if (!st) {
+          st = new MediaStream();
+          localStreamRef.current = st;
+          setLocalStream(st);
+        }
+        st.addTrack(newVideoTrack);
+        setLocalStream(new MediaStream(st.getTracks()));
+        setVideoEnabled(true);
+        setIsVideoCall(true);
+
+        if (pc) {
+          let vSender = pc.getSenders().find(s => s.track?.kind === 'video' || (s.track === null));
+          if (vSender) {
+            try { await vSender.replaceTrack(newVideoTrack); } catch {}
+          } else {
+            pc.addTrack(newVideoTrack, st);
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            localOfferRef.current = { type: offer.type, sdp: offer.sdp };
+            if (socket && targetId) {
+              socket.emit('webrtc_signal', {
+                to: targetId,
+                signal: { type: 'offer', offer: { type: offer.type, sdp: offer.sdp } },
+              });
+            }
+          }
+        }
+        if (socket && targetId) {
+          socket.emit('webrtc_signal', { to: targetId, signal: { type: 'camera_status', enabled: true } });
+        }
+      } catch (e) {
+        console.warn('Failed to turn on camera:', e);
+        alert('Не удалось получить доступ к камере.');
+      }
+    }
   };
 
   const onShareScreen = async () => {
@@ -1093,13 +1174,7 @@ export default function Chat() {
               setAudioEnabled(prev => !prev);
             }
           }}
-          onToggleVideo={() => {
-            const st = localStreamRef.current || localStream;
-            if (st) {
-              st.getVideoTracks().forEach(t => (t.enabled = !t.enabled));
-              setVideoEnabled(prev => !prev);
-            }
-          }}
+          onToggleVideo={toggleVideo}
           onShareScreen={onShareScreen}
           audioEnabled={audioEnabled}
           videoEnabled={videoEnabled}
@@ -1109,6 +1184,7 @@ export default function Chat() {
           remoteName={callPartnerInfo?.name || selectedUser?.username || users.find(u => u.id === activeCallPartnerIdRef.current)?.username || 'Собеседник'}
           isVideoCall={isVideoCall}
           isRemoteScreenSharing={isRemoteScreenSharing}
+          isRemoteCameraOn={isRemoteCameraOn}
         />
       )}
 
