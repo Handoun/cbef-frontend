@@ -74,6 +74,24 @@ export default function CallWindow({
     }
   }, [remoteStream]);
 
+  // Touch / click unlock to guarantee audio playback under browser autoplay policies
+  useEffect(() => {
+    const unlock = () => {
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.play().catch(() => {});
+      }
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.play().catch(() => {});
+      }
+    };
+    window.addEventListener('click', unlock, { once: true });
+    window.addEventListener('touchstart', unlock, { once: true });
+    return () => {
+      window.removeEventListener('click', unlock);
+      window.removeEventListener('touchstart', unlock);
+    };
+  }, []);
+
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
@@ -161,7 +179,6 @@ export default function CallWindow({
             ref={remoteVideoRef}
             autoPlay
             playsInline
-            muted
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           />
         ) : (
