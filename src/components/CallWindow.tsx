@@ -16,6 +16,7 @@ interface CallWindowProps {
   remoteAvatar?: string;
   remoteName?: string;
   isVideoCall?: boolean;
+  isRemoteScreenSharing?: boolean;
 }
 
 export default function CallWindow({
@@ -32,16 +33,14 @@ export default function CallWindow({
   remoteAvatar,
   remoteName = 'Собеседник',
   isVideoCall = true,
+  isRemoteScreenSharing = false,
 }: CallWindowProps) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const screenVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const [seconds, setSeconds] = useState(0);
-
-  const hasRemoteVideo = Boolean(
-    remoteStream && remoteStream.getVideoTracks().some(t => t.enabled && t.readyState === 'live')
-  );
+  const [hasRemoteVideo, setHasRemoteVideo] = useState<boolean>(false);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -61,6 +60,38 @@ export default function CallWindow({
       localVideoRef.current.srcObject = localStream;
     }
   }, [localStream]);
+
+  // Track detection on remoteStream
+  useEffect(() => {
+    if (!remoteStream) {
+      setHasRemoteVideo(false);
+      return;
+    }
+
+    const checkVideo = () => {
+      const vTracks = remoteStream.getVideoTracks();
+      const hasLive = vTracks.some(t => t.enabled && t.readyState === 'live');
+      setHasRemoteVideo(hasLive);
+    };
+
+    checkVideo();
+
+    const handleTrackAdded = () => checkVideo();
+    const handleTrackRemoved = () => checkVideo();
+    remoteStream.addEventListener('addtrack', handleTrackAdded);
+    remoteStream.addEventListener('removetrack', handleTrackRemoved);
+
+    remoteStream.getVideoTracks().forEach(t => {
+      t.onunmute = () => checkVideo();
+      t.onmute = () => checkVideo();
+      t.onended = () => checkVideo();
+    });
+
+    return () => {
+      remoteStream.removeEventListener('addtrack', handleTrackAdded);
+      remoteStream.removeEventListener('removetrack', handleTrackRemoved);
+    };
+  }, [remoteStream]);
 
   // Audio playback for both video and audio calls
   useEffect(() => {
@@ -119,13 +150,15 @@ export default function CallWindow({
         p.catch(err => console.warn('remoteVideoRef autoPlay blocked:', err));
       }
     }
-  }, [remoteStream, isVideoCall, hasRemoteVideo]);
+  }, [remoteStream, hasRemoteVideo, isRemoteScreenSharing]);
 
   useEffect(() => {
     if (screenVideoRef.current && screenStream) {
       screenVideoRef.current.srcObject = screenStream;
     }
   }, [screenStream]);
+
+  const showVideoArea = Boolean(hasRemoteVideo || isRemoteScreenSharing);
 
   return (
     <motion.div
@@ -167,7 +200,14 @@ export default function CallWindow({
         <div style={{ fontSize: 18, fontWeight: 600 }}>{remoteName}</div>
         <div style={{ fontSize: 14, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#22c55e' }} />
-          {isVideoCall ? 'Видеозвонок' : 'Аудиозвонок'} • {formatTime(seconds)}
+          {screenStream
+            ? 'Вы демонстрируете экран'
+            : isRemoteScreenSharing
+            ? '🖥️ Демонстрация экрана'
+            : isVideoCall
+            ? 'Видеозвонок'
+            : 'Аудиозвонок'}{' '}
+          • {formatTime(seconds)}
         </div>
       </div>
 
@@ -187,20 +227,46 @@ export default function CallWindow({
         }}
       >
         {screenStream ? (
-          <video
-            ref={screenVideoRef}
-            autoPlay
-            playsInline
-            muted
-            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-          />
-        ) : isVideoCall && hasRemoteVideo ? (
+          <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+            <video
+              ref={screenVideoRef}
+              autoPlay
+              playsInline
+              muted
+              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                top: 16,
+                left: 16,
+                background: 'rgba(0,0,0,0.65)',
+                backdropFilter: 'blur(8px)',
+                padding: '6px 14px',
+                borderRadius: '20px',
+                fontSize: 13,
+                color: '#22c55e',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                border: '1px solid rgba(34, 197, 94, 0.3)',
+              }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#22c55e' }} />
+              Вы демонстрируете экран
+            </div>
+          </div>
+        ) : showVideoArea ? (
           <video
             ref={remoteVideoRef}
             autoPlay
             playsInline
             muted
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: isRemoteScreenSharing ? 'contain' : 'cover',
+            }}
           />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
@@ -309,7 +375,7 @@ export default function CallWindow({
 
         <button
           onClick={onShareScreen}
-          title="Демонстрация экрана"
+          title={screenStream ? 'Остановить показ экрана' : 'Демонстрация экрана'}
           style={{
             ...actionBtnStyle,
             backgroundColor: screenStream ? '#22c55e' : 'rgba(255,255,255,0.15)',

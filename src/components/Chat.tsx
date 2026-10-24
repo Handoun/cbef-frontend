@@ -135,6 +135,7 @@ export default function Chat() {
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [callPartnerInfo, setCallPartnerInfo] = useState<{ name: string; avatar?: string } | null>(null);
+  const [isRemoteScreenSharing, setIsRemoteScreenSharing] = useState<boolean>(false);
 
   // Audio elements
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
@@ -276,6 +277,7 @@ export default function Chat() {
     setCurrentCall(null);
     setIncomingCall(null);
     setCallPartnerInfo(null);
+    setIsRemoteScreenSharing(false);
   };
 
   // Reset messages when switching chat
@@ -412,7 +414,10 @@ export default function Chat() {
       const pc = peerConnectionRef.current;
       const fromId = parseInt(from.toString());
 
-      if (signal?.type === 'offer') {
+      if (signal?.type === 'screen_share') {
+        console.log('🖥️ Remote screen share signal:', signal.isSharing);
+        setIsRemoteScreenSharing(Boolean(signal.isSharing));
+      } else if (signal?.type === 'offer') {
         pendingOfferRef.current = signal.offer;
         if (callAcceptedRef.current && pc) {
           await handleRemoteOfferAndAnswer(pc, fromId, signal.offer);
@@ -598,17 +603,20 @@ export default function Chat() {
         remoteMediaStreamRef.current = st;
       }
 
-      if (event.streams && event.streams[0]) {
-        event.streams[0].getTracks().forEach(t => {
-          t.enabled = true;
-          if (!st!.getTracks().some(existing => existing.id === t.id)) {
-            st!.addTrack(t);
+      if (event.track.kind === 'video') {
+        st.getVideoTracks().forEach(t => {
+          if (t.id !== event.track.id) {
+            st!.removeTrack(t);
           }
         });
+        st.addTrack(event.track);
       } else {
-        if (!st.getTracks().some(existing => existing.id === event.track.id)) {
-          st.addTrack(event.track);
-        }
+        st.getAudioTracks().forEach(t => {
+          if (t.id !== event.track.id) {
+            st!.removeTrack(t);
+          }
+        });
+        st.addTrack(event.track);
       }
 
       st.getAudioTracks().forEach(t => { t.enabled = true; });
@@ -798,43 +806,90 @@ export default function Chat() {
 
   const onShareScreen = async () => {
     try {
+      const targetId = activeCallPartnerIdRef.current || selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
+
       if (screenStreamRef.current || screenStream) {
+        // Stop screen share
         const st = screenStreamRef.current || screenStream;
         st?.getTracks().forEach(t => t.stop());
         screenStreamRef.current = null;
         setScreenStream(null);
 
+        if (socket && targetId) {
+          socket.emit('webrtc_signal', {
+            to: targetId,
+            signal: { type: 'screen_share', isSharing: false },
+          });
+        }
+
         const pc = peerConnectionRef.current;
-        if (pc && localStreamRef.current) {
-          const videoTrack = localStreamRef.current.getVideoTracks()[0];
-          const sender = pc.getSenders().find(s => s.track?.kind === 'video');
-          if (sender && videoTrack) {
-            sender.replaceTrack(videoTrack);
+        if (pc) {
+          const videoSender = pc.getSenders().find(s => s.track?.kind === 'video' || (s.track === null));
+          const camTrack = localStreamRef.current?.getVideoTracks()[0] || null;
+          if (videoSender) {
+            await videoSender.replaceTrack(camTrack);
           }
         }
       } else {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        // Start screen share
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: false,
+        });
+
         screenStreamRef.current = stream;
         setScreenStream(stream);
 
         const pc = peerConnectionRef.current;
         const screenTrack = stream.getVideoTracks()[0];
+
+        if (socket && targetId) {
+          socket.emit('webrtc_signal', {
+            to: targetId,
+            signal: { type: 'screen_share', isSharing: true },
+          });
+        }
+
         if (pc && screenTrack) {
-          const sender = pc.getSenders().find(s => s.track?.kind === 'video');
-          if (sender) {
-            sender.replaceTrack(screenTrack);
+          let videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
+          if (!videoSender) {
+            videoSender = pc.getSenders().find(s => !s.track);
+          }
+
+          if (videoSender) {
+            await videoSender.replaceTrack(screenTrack);
+          } else {
+            // No video sender (e.g. audio-only call) -> addTrack and renegotiate
+            pc.addTrack(screenTrack, stream);
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            localOfferRef.current = { type: offer.type, sdp: offer.sdp };
+            if (socket && targetId) {
+              socket.emit('webrtc_signal', {
+                to: targetId,
+                signal: { type: 'offer', offer: { type: offer.type, sdp: offer.sdp } },
+              });
+            }
           }
         }
 
-        screenTrack.onended = () => {
+        screenTrack.onended = async () => {
           screenStreamRef.current = null;
           setScreenStream(null);
+
+          if (socket && targetId) {
+            socket.emit('webrtc_signal', {
+              to: targetId,
+              signal: { type: 'screen_share', isSharing: false },
+            });
+          }
+
           const p = peerConnectionRef.current;
-          if (p && localStreamRef.current) {
-            const videoTrack = localStreamRef.current.getVideoTracks()[0];
-            const sender = p.getSenders().find(s => s.track?.kind === 'video');
-            if (sender && videoTrack) {
-              sender.replaceTrack(videoTrack);
+          if (p) {
+            const videoSender = p.getSenders().find(s => s.track?.kind === 'video' || !s.track);
+            const camTrack = localStreamRef.current?.getVideoTracks()[0] || null;
+            if (videoSender) {
+              await videoSender.replaceTrack(camTrack);
             }
           }
         };
@@ -1053,6 +1108,7 @@ export default function Chat() {
           remoteAvatar={callPartnerInfo?.avatar || selectedUser?.avatar || users.find(u => u.id === activeCallPartnerIdRef.current)?.avatar}
           remoteName={callPartnerInfo?.name || selectedUser?.username || users.find(u => u.id === activeCallPartnerIdRef.current)?.username || 'Собеседник'}
           isVideoCall={isVideoCall}
+          isRemoteScreenSharing={isRemoteScreenSharing}
         />
       )}
 
