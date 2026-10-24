@@ -1,47 +1,133 @@
-[data-theme='ocean'] {
-  --bg-color: #e0f7fa;
-  --sidebar-bg: #b2ebf2;
-  --chat-bg: #e0f7fa;
-  --header-bg: #b2ebf2;
-  --input-bg: #ffffff;
-  --text-primary: #006064;
-  --text-secondary: #004d40;
-  --border-color: #80deea;
-  --message-own-bg: #b2dfdb;
+:root,
+[data-theme='light'] {
+  --bg-color: #f0f2f5;
+  --sidebar-bg: #ffffff;
+  --chat-bg: #eef2f6;
+  --header-bg: #ffffff;
+  --input-bg: #f1f5f9;
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --border-color: #e2e8f0;
+  --message-own-bg: #0084ff;
+  --message-own-text: #ffffff;
   --message-other-bg: #ffffff;
-  --hover-bg: #b2ebf2;
-  --button-bg: #80deea;
-  --button-text: #004d40;
+  --message-other-text: #0f172a;
+  --hover-bg: #f8fafc;
+  --button-bg: #0084ff;
+  --button-text: #ffffff;
+  --active-chat-bg: #e0f2fe;
+  --chat-pattern: radial-gradient(#cbd5e1 1px, transparent 1px);
+}
+
+[data-theme='dark'] {
+  --bg-color: #0b1120;
+  --sidebar-bg: #151e32;
+  --chat-bg: #0b1120;
+  --header-bg: #151e32;
+  --input-bg: #1e293b;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --border-color: #222f49;
+  --message-own-bg: #2563eb;
+  --message-own-text: #ffffff;
+  --message-other-bg: #1e293b;
+  --message-other-text: #f8fafc;
+  --hover-bg: #1e293b;
+  --button-bg: #2563eb;
+  --button-text: #ffffff;
+  --active-chat-bg: #1e3a8a;
+  --chat-pattern: radial-gradient(#1e293b 1px, transparent 1px);
+}
+
+[data-theme='ocean'] {
+  --bg-color: #0f2b38;
+  --sidebar-bg: #163847;
+  --chat-bg: #0f2b38;
+  --header-bg: #163847;
+  --input-bg: #1c4557;
+  --text-primary: #e0f7fa;
+  --text-secondary: #80deea;
+  --border-color: #245366;
+  --message-own-bg: #00838f;
+  --message-own-text: #ffffff;
+  --message-other-bg: #163847;
+  --message-other-text: #e0f7fa;
+  --hover-bg: #1c4557;
+  --button-bg: #00acc1;
+  --button-text: #ffffff;
+  --active-chat-bg: #006064;
+  --chat-pattern: radial-gradient(#1c4557 1px, transparent 1px);
 }
 
 [data-theme='forest'] {
-  --bg-color: #f1f8e9;
-  --sidebar-bg: #dcedc8;
-  --chat-bg: #f1f8e9;
-  --header-bg: #dcedc8;
-  --input-bg: #ffffff;
-  --text-primary: #33691e;
-  --text-secondary: #1b5e20;
-  --border-color: #aed581;
-  --message-own-bg: #c5e1a5;
-  --message-other-bg: #ffffff;
-  --hover-bg: #dcedc8;
-  --button-bg: #aed581;
-  --button-text: #1b5e20;
+  --bg-color: #112217;
+  --sidebar-bg: #183122;
+  --chat-bg: #112217;
+  --header-bg: #183122;
+  --input-bg: #22432e;
+  --text-primary: #f1f8e9;
+  --text-secondary: #aed581;
+  --border-color: #2c553b;
+  --message-own-bg: #2e7d32;
+  --message-own-text: #ffffff;
+  --message-other-bg: #183122;
+  --message-other-text: #f1f8e9;
+  --hover-bg: #22432e;
+  --button-bg: #388e3c;
+  --button-text: #ffffff;
+  --active-chat-bg: #1b5e20;
+  --chat-pattern: radial-gradient(#22432e 1px, transparent 1px);
 }
 
 [data-theme='sunset'] {
-  --bg-color: #fff3e0;
-  --sidebar-bg: #ffe0b2;
-  --chat-bg: #fff3e0;
-  --header-bg: #ffe0b2;
-  --input-bg: #ffffff;
-  --text-primary: #e65100;
-  --text-secondary: #bf360c;
-  --border-color: #ffcc80;
-  --message-own-bg: #ffcc80;
-  --message-other-bg: #ffffff;
-  --hover-bg: #ffe0b2;
-  --button-bg: #ffb74d;
-  --button-text: #bf360c;
+  --bg-color: #2b1810;
+  --sidebar-bg: #3b2217;
+  --chat-bg: #2b1810;
+  --header-bg: #3b2217;
+  --input-bg: #4f2d1e;
+  --text-primary: #fff3e0;
+  --text-secondary: #ffb74d;
+  --border-color: #633926;
+  --message-own-bg: #d84315;
+  --message-own-text: #ffffff;
+  --message-other-bg: #3b2217;
+  --message-other-text: #fff3e0;
+  --hover-bg: #4f2d1e;
+  --button-bg: #f4511e;
+  --button-text: #ffffff;
+  --active-chat-bg: #bf360c;
+  --chat-pattern: radial-gradient(#4f2d1e 1px, transparent 1px);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.5);
 }

@@ -4,6 +4,7 @@ import axios from 'axios';
 import { Peer } from 'peerjs';
 import EmojiPicker from 'emoji-picker-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import AddFriend from './AddFriend';
 import FriendRequests from './FriendRequests';
 import CallWindow from './CallWindow';
@@ -14,10 +15,10 @@ import StickerPackViewer from './StickerPackViewer';
 import AdminPanel from './AdminPanel';
 import Avatar from './Avatar';
 import UpdateBanner from './UpdateBanner';
-import DevicePrompt from './DevicePrompt';
 import ImageLightbox from './ImageLightbox';
 import ChannelSearch from './ChannelSearch';
 import ProfileModal from './ProfileModal';
+import { ringtone } from '../utils/ringtone';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL;
@@ -25,71 +26,68 @@ const PEER_HOST = import.meta.env.VITE_PEER_HOST;
 const PEER_PORT = import.meta.env.VITE_PEER_PORT;
 const PEER_PATH = import.meta.env.VITE_PEER_PATH;
 
-const styles: { [key: string]: React.CSSProperties & { [key: string]: any } } = {
-  container: { display: 'flex', height: '100vh', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', backgroundColor: 'var(--bg-color)', transition: 'background-color 0.2s ease' },
-  sidebar: { width: '30%', minWidth: 280, maxWidth: 400, backgroundColor: 'var(--sidebar-bg)', borderRight: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', transition: 'all 0.2s ease' },
-  sidebarPhone: { position: 'fixed', top: 0, left: 0, bottom: 0, width: '100%', maxWidth: '100%', zIndex: 20, backgroundColor: 'var(--sidebar-bg)', borderRight: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', transition: 'all 0.2s ease' },
-  sidebarHeader: { padding: '16px 20px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--header-bg)' },
-  sidebarTitle: { margin: 0, fontSize: '22px', fontWeight: 700, color: 'var(--text-primary)' },
-  contactList: { flex: 1, overflowY: 'auto' },
-  contactItem: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)', transition: 'background-color 0.15s ease' },
-  contactInfo: { display: 'flex', alignItems: 'center', gap: '12px' },
-  contactName: { fontSize: '16px', fontWeight: 500, color: 'var(--text-primary)' },
-  onlineDot: { width: 12, height: 12, borderRadius: '50%', backgroundColor: '#4caf50', boxShadow: '0 0 0 2px var(--sidebar-bg)' },
-  offlineDot: { width: 12, height: 12, borderRadius: '50%', backgroundColor: 'var(--text-secondary)', boxShadow: '0 0 0 2px var(--sidebar-bg)' },
-  addButton: { backgroundColor: 'var(--button-bg)', border: 'none', borderRadius: '24px', padding: '6px 14px', fontSize: '14px', fontWeight: 500, color: 'var(--button-text)', cursor: 'pointer', transition: 'opacity 0.15s ease' },
-  chatArea: { flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: 'var(--chat-bg)', backgroundImage: 'var(--chat-pattern)' },
-  chatHeader: { padding: '16px 20px', backgroundColor: 'var(--header-bg)', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  chatHeaderTitle: { margin: 0, fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)' },
-  callButton: { backgroundColor: 'var(--button-bg)', border: 'none', borderRadius: '30px', padding: '10px 18px', fontSize: '14px', fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--button-text)' },
-  hangUpButton: { backgroundColor: '#ff4d4f', color: '#fff', border: 'none', borderRadius: '30px', padding: '10px 18px', fontSize: '14px', fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' },
-  messagesContainer: { flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '8px' },
-  messageRow: { display: 'flex', alignItems: 'flex-end' },
-  messageBubble: { maxWidth: '75%', padding: '10px 14px', borderRadius: '20px', fontSize: '15px', lineHeight: 1.4, wordBreak: 'break-word', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' },
-  messageOwn: { backgroundColor: 'var(--message-own-bg)', alignSelf: 'flex-end', borderBottomRightRadius: '4px', color: 'var(--text-primary)' },
-  messageOther: { backgroundColor: 'var(--message-other-bg)', alignSelf: 'flex-start', borderBottomLeftRadius: '4px', color: 'var(--text-primary)' },
-  inputContainer: { padding: '16px 20px', backgroundColor: 'var(--header-bg)', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '12px', alignItems: 'center' },
-  input: { flex: 1, padding: '12px 18px', border: '1px solid var(--border-color)', borderRadius: '30px', fontSize: '15px', outline: 'none', backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', transition: 'border-color 0.15s ease, box-shadow 0.15s ease' },
-  sendButton: { backgroundColor: '#0084ff', color: '#fff', border: 'none', borderRadius: '30px', padding: '12px 24px', fontSize: '15px', fontWeight: 600, cursor: 'pointer' },
-  emptyChat: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '16px', backgroundColor: 'var(--chat-bg)' },
-  iconButton: { background: 'none', border: 'none', fontSize: '26px', cursor: 'pointer', padding: '8px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  attachmentMenu: { position: 'absolute', bottom: '80px', left: '20px', backgroundColor: 'var(--sidebar-bg)', borderRadius: '20px', boxShadow: '0 8px 24px rgba(0,0,0,0.15)', padding: '12px', display: 'flex', gap: '12px', zIndex: 10 },
-  stickerGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px', padding: '4px' },
-  sticker: { fontSize: '24px', cursor: 'pointer', textAlign: 'center', padding: 4, borderRadius: 8, transition: 'background-color 0.15s ease' },
-  backButton: { background: 'none', border: 'none', fontSize: '28px', cursor: 'pointer', padding: '0 16px 0 0', color: 'var(--text-secondary)', display: 'block' },
-  badge: { backgroundColor: 'red', color: 'white', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, marginLeft: 8 },
-  ttlButton: { background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--text-secondary)', padding: '0 8px' },
-};
+interface User {
+  id: number;
+  username: string;
+  avatar?: string;
+  is_admin?: boolean;
+  banned?: boolean;
+  bio?: string;
+  premium?: boolean;
+  is_premium?: boolean;
+}
 
-interface User { id: number; username: string; avatar?: string; is_admin?: boolean; banned?: boolean; bio?: string; premium?: boolean; }
-interface Message { id: number; sender_id: number; receiver_id: number; group_id?: number; channel_id?: number; text: string; image?: string; audio?: string; status?: string; created_at: string; expires_at?: string; }
+interface Message {
+  id: number;
+  sender_id: number;
+  receiver_id: number;
+  group_id?: number;
+  channel_id?: number;
+  text: string;
+  image?: string;
+  audio?: string;
+  status?: string;
+  created_at: string;
+  expires_at?: string;
+}
 
 export default function Chat() {
+  const navigate = useNavigate();
   const [users, setUsers] = useState<User[]>([]);
   const [contacts, setContacts] = useState<User[]>([]);
   const [groups, setGroups] = useState<any[]>([]);
   const [channels, setChannels] = useState<any[]>([]);
+
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<any | null>(null);
   const [selectedChannel, setSelectedChannel] = useState<any | null>(null);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [groupMessages, setGroupMessages] = useState<any[]>([]);
   const [channelMessages, setChannelMessages] = useState<any[]>([]);
   const [input, setInput] = useState('');
-  const [ttl, setTtl] = useState<number>(0); // 0 = выкл
+  const [ttl, setTtl] = useState<number>(0);
+
   const [socket, setSocket] = useState<Socket | null>(null);
   const [onlineUsers, setOnlineUsers] = useState<Set<number>>(new Set());
+
+  // Calls
   const [peer, setPeer] = useState<Peer | null>(null);
   const [currentCall, setCurrentCall] = useState<any>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [incomingCall, setIncomingCall] = useState<{ call: any; from: string } | null>(null);
+  const [isVideoCall, setIsVideoCall] = useState<boolean>(true);
+  const [videoEnabled, setVideoEnabled] = useState(true);
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
+
+  // Audio elements
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const ringtoneNodesRef = useRef<any[]>([]);
 
+  // Modals & UI states
   const [showEmoji, setShowEmoji] = useState(false);
   const [showAttachment, setShowAttachment] = useState(false);
   const [showStickers, setShowStickers] = useState(false);
@@ -98,182 +96,203 @@ export default function Chat() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [showChannelSearch, setShowChannelSearch] = useState(false);
-  const [showDevicePrompt, setShowDevicePrompt] = useState(false);
+  const [showGroupCreator, setShowGroupCreator] = useState(false);
+  const [showChannelCreator, setShowChannelCreator] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
   const [profileUserId, setProfileUserId] = useState<number | null>(null);
+
+  // Recording
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
-  const [showSidebar, setShowSidebar] = useState(true);
-  const [deviceType, setDeviceType] = useState<'phone' | 'desktop'>('desktop');
+
+  // Device & responsive auto-detection
+  const [isMobile, setIsMobile] = useState<boolean>(() => {
+    return typeof window !== 'undefined'
+      ? window.innerWidth <= 768 || /Android|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent)
+      : false;
+  });
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState<'all' | 'direct' | 'groups' | 'channels'>('all');
   const [refreshContacts, setRefreshContacts] = useState(0);
-  const [videoEnabled, setVideoEnabled] = useState(true);
-  const [audioEnabled, setAudioEnabled] = useState(true);
-  const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [unreadCounts, setUnreadCounts] = useState<Record<number, number>>({});
   const [lastMessageTimes, setLastMessageTimes] = useState<Record<number, string>>({});
-  const [showGroupCreator, setShowGroupCreator] = useState(false);
-  const [showChannelCreator, setShowChannelCreator] = useState(false);
   const [channelSubscribersCount, setChannelSubscribersCount] = useState<number>(0);
 
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
   const token = localStorage.getItem('token');
-  const isAdmin = currentUser.isAdmin === true;
-  const isPremium = currentUser.premium === true;
+  const isAdmin = currentUser.is_admin === true || currentUser.isAdmin === true;
+  const isPremium = currentUser.is_premium === true || currentUser.premium === true;
 
-  const scrollToBottom = () => { if (messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' }); };
-  useEffect(() => { scrollToBottom(); }, [messages, groupMessages, channelMessages]);
-
-  // Проверка выбора устройства при первом входе
+  // Dynamic window resize listener for seamless responsive design
   useEffect(() => {
-    const devicePref = localStorage.getItem('devicePreference');
-    if (!devicePref) {
-      setShowDevicePrompt(true);
-    } else {
-      setDeviceType(devicePref as 'phone' | 'desktop');
-    }
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768 || /Android|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent));
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Сброс сообщений при смене чата
+  const scrollToBottom = () => {
+    if (messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+  };
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, groupMessages, channelMessages]);
+
+  // Reset messages when switching chat
   useEffect(() => {
     setMessages([]);
     setGroupMessages([]);
     setChannelMessages([]);
   }, [selectedUser?.id, selectedGroup?.id, selectedChannel?.id]);
 
-  // Скрытие сайдбара при открытом чате
-  useEffect(() => {
-    if (selectedUser || selectedGroup || selectedChannel) {
-      setShowSidebar(false);
-    } else {
-      setShowSidebar(true);
-    }
-  }, [selectedUser, selectedGroup, selectedChannel]);
-
-  const handleDeviceSelect = (device: 'desktop' | 'phone') => {
-    localStorage.setItem('devicePreference', device);
-    setDeviceType(device);
-    setShowDevicePrompt(false);
-    setShowSidebar(true);
-  };
-
-  const openDevicePrompt = () => setShowDevicePrompt(true);
-
-  const handleBackToContacts = () => {
+  const handleBackToList = () => {
     setSelectedUser(null);
     setSelectedGroup(null);
     setSelectedChannel(null);
-    setShowSidebar(true);
   };
 
+  // Fetch initial data
   useEffect(() => {
     if (!token) return;
-    axios.get(`${API_URL}/api/users`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setUsers(r.data)).catch(console.error);
-    axios.get(`${API_URL}/api/contacts`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setContacts(r.data)).catch(console.error);
-    axios.get(`${API_URL}/api/groups`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setGroups(r.data)).catch(console.error);
-    axios.get(`${API_URL}/api/channels`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setChannels(r.data)).catch(console.error);
+    axios.get(`${API_URL}/api/users`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setUsers(r.data || [])).catch(console.error);
+    axios.get(`${API_URL}/api/contacts`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setContacts(r.data || [])).catch(console.error);
+    axios.get(`${API_URL}/api/groups`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setGroups(r.data || [])).catch(console.error);
+    axios.get(`${API_URL}/api/channels`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setChannels(r.data || [])).catch(console.error);
   }, [token, refreshContacts]);
 
-  // Запрос разрешения на уведомления
+  // Socket.IO
   useEffect(() => {
-    if (Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []);
-
-  const notify = (title: string, body: string) => {
-    if (Notification.permission === 'granted') {
-      new Notification(title, { body });
-    }
-  };
-
-  useEffect(() => {
-    const newSocket = io(SOCKET_URL, { auth: { token }, transports: ['polling'] });
+    if (!token) return;
+    const newSocket = io(SOCKET_URL, { auth: { token }, transports: ['polling', 'websocket'] });
     setSocket(newSocket);
+
     newSocket.on('connect', () => console.log('Socket connected'));
+
     newSocket.on('private_message', (msg: Message) => {
       if (selectedUser && (msg.sender_id === selectedUser.id || msg.sender_id === currentUser.id)) {
         setMessages(prev => [...prev, msg]);
       } else if (msg.sender_id !== currentUser.id) {
-        notify('Новое сообщение', 'Вам пришло личное сообщение');
         setUnreadCounts(prev => ({ ...prev, [msg.sender_id]: (prev[msg.sender_id] || 0) + 1 }));
         setLastMessageTimes(prev => ({ ...prev, [msg.sender_id]: msg.created_at }));
       }
     });
+
     newSocket.on('group_message', (msg: Message) => {
       if (selectedGroup && msg.group_id === selectedGroup.id) {
         setGroupMessages(prev => [...prev, msg]);
-      } else {
-        notify('Новое сообщение', 'Новое сообщение в группе');
       }
     });
+
     newSocket.on('channel_message', (msg: Message) => {
       if (selectedChannel && msg.channel_id === selectedChannel.id) {
         setChannelMessages(prev => [...prev, msg]);
-      } else {
-        notify('Новое сообщение', 'Новое сообщение в канале');
       }
     });
-    newSocket.on('user_status', ({ userId, online }: { userId: number, online: boolean }) => {
-      setOnlineUsers(prev => { const n = new Set(prev); online ? n.add(userId) : n.delete(userId); return n; });
+
+    newSocket.on('user_status', ({ userId, online }: { userId: number; online: boolean }) => {
+      setOnlineUsers(prev => {
+        const n = new Set(prev);
+        online ? n.add(userId) : n.delete(userId);
+        return n;
+      });
     });
-    newSocket.on('friend_request', ({ fromName }: { fromName: string }) => { alert(`Новая заявка от ${fromName}`); setRefreshContacts(p => p + 1); });
-    newSocket.on('friend_request_accepted', ({ byName }: { byName: string }) => { alert(`${byName} принял заявку`); setRefreshContacts(p => p + 1); });
+
+    newSocket.on('friend_request', ({ fromName }: { fromName: string }) => {
+      alert(`Новая заявка в друзья от ${fromName}`);
+      setRefreshContacts(p => p + 1);
+    });
+
+    newSocket.on('friend_request_accepted', ({ byName }: { byName: string }) => {
+      alert(`${byName} принял заявку в друзья`);
+      setRefreshContacts(p => p + 1);
+    });
+
     newSocket.on('message_status', ({ receiverId, status }: { receiverId: number; status: string }) => {
-      setMessages(prev => prev.map(msg => {
-        if (msg.receiver_id === receiverId && msg.sender_id === currentUser.id && msg.status !== 'read') {
-          return { ...msg, status };
-        }
-        return msg;
-      }));
+      setMessages(prev =>
+        prev.map(msg => {
+          if (msg.receiver_id === receiverId && msg.sender_id === currentUser.id && msg.status !== 'read') {
+            return { ...msg, status };
+          }
+          return msg;
+        })
+      );
     });
+
     newSocket.on('banned', () => {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.hash = '#/login';
+      navigate('/login', { replace: true });
       alert('Ваш аккаунт заблокирован администратором.');
     });
-    newSocket.on('error', (error: string) => {
-      alert(error);
-    });
-    return () => { newSocket.disconnect(); };
-  }, [token, currentUser.id, selectedUser, selectedGroup, selectedChannel]);
 
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [token, currentUser.id, selectedUser, selectedGroup, selectedChannel, navigate]);
+
+  // PeerJS calls setup
   useEffect(() => {
+    if (!currentUser.id) return;
     const newPeer = new Peer(currentUser.id.toString(), {
-      host: PEER_HOST, port: parseInt(PEER_PORT), path: PEER_PATH, secure: true,
+      host: PEER_HOST,
+      port: parseInt(PEER_PORT),
+      path: PEER_PATH,
+      secure: true,
     });
     setPeer(newPeer);
-    newPeer.on('open', (id) => console.log('PeerJS:', id));
-    newPeer.on('call', (call) => setIncomingCall({ call, from: call.peer }));
-    return () => newPeer.destroy();
+
+    newPeer.on('call', call => {
+      setIncomingCall({ call, from: call.peer });
+      ringtone.startIncomingRingtone();
+    });
+
+    return () => {
+      ringtone.stop();
+      newPeer.destroy();
+    };
   }, [currentUser.id]);
 
+  // Load chat messages
   useEffect(() => {
-    if (!selectedUser) return;
-    axios.get(`${API_URL}/api/messages/${selectedUser.id}`, { headers: { Authorization: `Bearer ${token}` } }).then(r => {
-      const fixed = r.data.map((m: Message) => {
-        if (m.image && !m.image.startsWith('data:image') && !m.image.startsWith('http')) {
-          return { ...m, text: m.image, image: undefined };
-        }
-        return m;
-      });
-      setMessages(fixed);
-      setUnreadCounts(prev => ({ ...prev, [selectedUser.id]: 0 }));
-      axios.put(`${API_URL}/api/messages/${selectedUser.id}/read`, {}, { headers: { Authorization: `Bearer ${token}` } }).catch(console.error);
-    }).catch(console.error);
+    if (!selectedUser || !token) return;
+    axios
+      .get(`${API_URL}/api/messages/${selectedUser.id}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => {
+        const fixed = (r.data || []).map((m: Message) => {
+          if (m.image && !m.image.startsWith('data:image') && !m.image.startsWith('http')) {
+            return { ...m, text: m.image, image: undefined };
+          }
+          return m;
+        });
+        setMessages(fixed);
+        setUnreadCounts(prev => ({ ...prev, [selectedUser.id]: 0 }));
+        axios.put(`${API_URL}/api/messages/${selectedUser.id}/read`, {}, { headers: { Authorization: `Bearer ${token}` } }).catch(console.error);
+      })
+      .catch(console.error);
   }, [selectedUser, token]);
 
   useEffect(() => {
-    if (!selectedGroup) return;
-    axios.get(`${API_URL}/api/groups/${selectedGroup.id}/messages`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setGroupMessages(r.data)).catch(console.error);
+    if (!selectedGroup || !token) return;
+    axios
+      .get(`${API_URL}/api/groups/${selectedGroup.id}/messages`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => setGroupMessages(r.data || []))
+      .catch(console.error);
   }, [selectedGroup, token]);
 
   useEffect(() => {
-    if (!selectedChannel) return;
-    axios.get(`${API_URL}/api/channels/${selectedChannel.id}/messages`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setChannelMessages(r.data)).catch(console.error);
-    axios.get(`${API_URL}/api/channels/${selectedChannel.id}/subscribers`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => setChannelSubscribersCount(r.data.count)).catch(console.error);
+    if (!selectedChannel || !token) return;
+    axios
+      .get(`${API_URL}/api/channels/${selectedChannel.id}/messages`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => setChannelMessages(r.data || []))
+      .catch(console.error);
+
+    axios
+      .get(`${API_URL}/api/channels/${selectedChannel.id}/subscribers`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => setChannelSubscribersCount(r.data.count || 0))
+      .catch(console.error);
   }, [selectedChannel, token]);
 
   const sendMessage = (extra?: { image?: string; audio?: string }) => {
@@ -292,101 +311,165 @@ export default function Chat() {
     setTtl(0);
   };
 
-  const copyChannelInviteLink = () => {
-    if (!selectedChannel) return;
-    const link = `${window.location.origin}/#/channel/${selectedChannel.id}`;
-    navigator.clipboard.writeText(link).then(() => alert('Ссылка скопирована!')).catch(() => prompt('Скопируйте ссылку вручную:', link));
-  };
+  // Calling functions
+  const startCall = async (video: boolean) => {
+    if (!peer || !selectedUser) return;
+    setIsVideoCall(video);
+    ringtone.startOutgoingRingback();
 
-  // --- Звук звонка ---
-  const startRingtone = async () => {
+    let stream: MediaStream | null = null;
     try {
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: video });
+    } catch {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        setIsVideoCall(false);
+      } catch {
+        ringtone.stop();
+        alert('Не удалось получить доступ к микрофону/камере.');
+        return;
       }
-      const ctx = audioContextRef.current;
-      if (ctx.state === 'suspended') await ctx.resume();
-      const oscillator = ctx.createOscillator();
-      const gain = ctx.createGain();
-      oscillator.type = 'sine';
-      oscillator.frequency.value = 440;
-      gain.gain.value = 0.05;
-      oscillator.connect(gain);
-      gain.connect(ctx.destination);
-      oscillator.start();
-      const interval = setInterval(() => {
-        if (gain.gain.value > 0) gain.gain.value = 0;
-        else gain.gain.value = 0.05;
-      }, 500);
-      ringtoneNodesRef.current = [oscillator, gain, interval];
-      if (navigator.vibrate) navigator.vibrate([500, 200, 500]);
-    } catch (err) { console.warn('Не удалось запустить звонок:', err); }
-  };
+    }
 
-  const stopRingtone = () => {
-    if (ringtoneNodesRef.current.length) {
-      const [osc, gain, interval] = ringtoneNodesRef.current;
-      clearInterval(interval);
-      gain.disconnect();
-      osc.stop();
-      osc.disconnect();
-      ringtoneNodesRef.current = [];
+    if (stream) {
+      setLocalStream(stream);
+      setAudioEnabled(true);
+      setVideoEnabled(video);
+    }
+
+    const call = peer.call(selectedUser.id.toString(), stream || undefined);
+    if (call) {
+      setCurrentCall(call);
+      call.on('stream', (rs: MediaStream) => {
+        ringtone.stop();
+        setRemoteStream(rs);
+      });
+      call.on('close', () => {
+        ringtone.stop();
+        setCurrentCall(null);
+        stopLocalStream();
+      });
     }
   };
 
-  useEffect(() => {
-    if (incomingCall && !currentCall) startRingtone();
-    else stopRingtone();
-    return () => stopRingtone();
-  }, [incomingCall, currentCall]);
-
-  useEffect(() => {
-    const unlock = () => {
-      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-        audioContextRef.current.resume();
-      }
-      document.removeEventListener('pointerdown', unlock);
-    };
-    document.addEventListener('pointerdown', unlock);
-    return () => document.removeEventListener('pointerdown', unlock);
-  }, []);
-  // --- Конец звука ---
-
-  const startCall = async () => {
-    stopRingtone();
-    if (!peer || (!selectedUser && !selectedGroup)) return;
-    let stream: MediaStream | null = null;
-    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true }); }
-    catch { try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { alert('Нет доступа к микрофону/камере. Звонок будет без медиа.'); } }
-    if (stream) { setLocalStream(stream); setAudioEnabled(true); setVideoEnabled(true); }
-    const targetId = selectedUser ? selectedUser.id.toString() : `group_${selectedGroup?.id}`;
-    const call = peer.call(targetId, stream || undefined);
-    if (call) { setCurrentCall(call); call.on('stream', (rs: MediaStream) => setRemoteStream(rs)); call.on('close', () => { setCurrentCall(null); stopLocalStream(); }); }
-  };
-
   const acceptCall = async () => {
-    stopRingtone();
+    ringtone.stop();
     if (!incomingCall) return;
+
     let stream: MediaStream | null = null;
-    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true }); }
-    catch { try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { alert('Нет доступа к микрофону'); } }
-    if (stream) { setLocalStream(stream); setAudioEnabled(true); setVideoEnabled(true); }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      setIsVideoCall(true);
+    } catch {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        setIsVideoCall(false);
+      } catch {
+        alert('Не удалось получить доступ к микрофону.');
+      }
+    }
+
+    if (stream) {
+      setLocalStream(stream);
+      setAudioEnabled(true);
+      setVideoEnabled(true);
+    }
+
     incomingCall.call.answer(stream || undefined);
     setCurrentCall(incomingCall.call);
-    incomingCall.call.on('stream', (rs: MediaStream) => setRemoteStream(rs));
-    incomingCall.call.on('close', () => { setCurrentCall(null); stopLocalStream(); });
+
+    incomingCall.call.on('stream', (rs: MediaStream) => {
+      setRemoteStream(rs);
+    });
+
+    incomingCall.call.on('close', () => {
+      setCurrentCall(null);
+      stopLocalStream();
+    });
+
     setIncomingCall(null);
   };
 
-  const declineCall = () => { stopRingtone(); if (incomingCall) { incomingCall.call.close(); setIncomingCall(null); } };
-  const hangUp = () => { stopRingtone(); if (currentCall) { currentCall.close(); setCurrentCall(null); } stopLocalStream(); };
-  const stopLocalStream = () => { if (localStream) { localStream.getTracks().forEach(t => t.stop()); setLocalStream(null); } if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); setScreenStream(null); } setRemoteStream(null); };
-  const onShareScreen = async () => { /* реализация по желанию */ };
+  const declineCall = () => {
+    ringtone.stop();
+    if (incomingCall) {
+      incomingCall.call.close();
+      setIncomingCall(null);
+    }
+  };
 
-  const addContact = (userId: number) => { axios.post(`${API_URL}/api/contacts`, { contactId: userId }, { headers: { Authorization: `Bearer ${token}` } }).then(() => { const u = users.find(u => u.id === userId); if (u) setContacts(prev => [...prev, u]); }).catch(console.error); };
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (!f) return; const reader = new FileReader(); reader.onload = () => sendMessage({ image: reader.result as string }); reader.readAsDataURL(f); if (fileInputRef.current) fileInputRef.current.value = ''; };
-  const startRecording = async () => { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); const recorder = new MediaRecorder(stream); const chunks: Blob[] = []; recorder.ondataavailable = e => chunks.push(e.data); recorder.onstop = () => { const blob = new Blob(chunks, { type: 'audio/webm' }); const reader = new FileReader(); reader.onload = () => sendMessage({ audio: reader.result as string }); reader.readAsDataURL(blob); stream.getTracks().forEach(t => t.stop()); }; recorder.start(); setMediaRecorder(recorder); setRecording(true); } catch { alert('Нет микрофона'); } };
-  const stopRecording = () => { mediaRecorder?.stop(); setRecording(false); };
+  const hangUp = () => {
+    ringtone.stop();
+    if (currentCall) {
+      currentCall.close();
+      setCurrentCall(null);
+    }
+    stopLocalStream();
+  };
+
+  const stopLocalStream = () => {
+    if (localStream) {
+      localStream.getTracks().forEach(t => t.stop());
+      setLocalStream(null);
+    }
+    if (screenStream) {
+      screenStream.getTracks().forEach(t => t.stop());
+      setScreenStream(null);
+    }
+    setRemoteStream(null);
+  };
+
+  const onShareScreen = async () => {
+    try {
+      if (screenStream) {
+        screenStream.getTracks().forEach(t => t.stop());
+        setScreenStream(null);
+      } else {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        setScreenStream(stream);
+        stream.getVideoTracks()[0].onended = () => setScreenStream(null);
+      }
+    } catch (err) {
+      console.warn('Screen share canceled or failed', err);
+    }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => sendMessage({ image: reader.result as string });
+    reader.readAsDataURL(f);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    setShowAttachment(false);
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = e => chunks.push(e.data);
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.onload = () => sendMessage({ audio: reader.result as string });
+        reader.readAsDataURL(blob);
+        stream.getTracks().forEach(t => t.stop());
+      };
+      recorder.start();
+      setMediaRecorder(recorder);
+      setRecording(true);
+    } catch {
+      alert('Нет доступа к микрофону');
+    }
+  };
+
+  const stopRecording = () => {
+    mediaRecorder?.stop();
+    setRecording(false);
+    setShowAttachment(false);
+  };
 
   const stickers = ['😊', '😂', '😍', '👍', '🎉', '🔥', '❤️', '💯'];
   const sendSticker = (sticker: string) => {
@@ -401,239 +484,872 @@ export default function Chat() {
     setShowStickerPack(false);
   };
 
-  const handleSearchMessages = async () => {
-    if (!isPremium) {
-      alert('Поиск по сообщениям доступен только Premium-пользователям.');
-      return;
-    }
-    const query = prompt('Введите текст для поиска:');
-    if (!query) return;
-    try {
-      const res = await axios.get(`${API_URL}/api/messages/search?query=${encodeURIComponent(query)}`, { headers: { Authorization: `Bearer ${token}` } });
-      if (res.data.length === 0) {
-        alert('Ничего не найдено.');
-      } else {
-        const formatted = res.data.map((m: any) => `[${new Date(m.created_at).toLocaleString()}] ${m.sender_name}: ${m.text}`).join('\n');
-        alert(`Найдено сообщений: ${res.data.length}\n\n${formatted}`);
-      }
-    } catch (err) { console.error(err); alert('Ошибка поиска'); }
+  const copyChannelInviteLink = () => {
+    if (!selectedChannel) return;
+    const link = `${window.location.origin}/#/channel/${selectedChannel.id}`;
+    navigator.clipboard.writeText(link).then(() => alert('Ссылка скопирована!')).catch(() => prompt('Скопируйте ссылку вручную:', link));
   };
 
   const cycleTtl = () => {
     const options = [0, 60, 300, 3600];
     const currentIndex = options.indexOf(ttl);
-    const next = options[(currentIndex + 1) % options.length];
-    setTtl(next);
+    setTtl(options[(currentIndex + 1) % options.length]);
   };
 
-  const displayedContacts = [...contacts].sort((a, b) => {
-    const unreadA = unreadCounts[a.id] || 0;
-    const unreadB = unreadCounts[b.id] || 0;
-    if (unreadA > 0 && unreadB === 0) return -1;
-    if (unreadB > 0 && unreadA === 0) return 1;
-    const timeA = lastMessageTimes[a.id] || '';
-    const timeB = lastMessageTimes[b.id] || '';
-    if (timeA && timeB) return timeB.localeCompare(timeA);
-    if (timeA && !timeB) return -1;
-    if (!timeA && timeB) return 1;
-    return a.username.localeCompare(b.username);
-  });
+  // Filter contacts by tab and search
+  const filteredContacts = contacts
+    .filter(u => u.username.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => {
+      const unreadA = unreadCounts[a.id] || 0;
+      const unreadB = unreadCounts[b.id] || 0;
+      if (unreadA > 0 && unreadB === 0) return -1;
+      if (unreadB > 0 && unreadA === 0) return 1;
+      return a.username.localeCompare(b.username);
+    });
 
-  const messageMaxWidth = deviceType === 'phone' ? '90%' : '85%';
-  const messageFontSize = deviceType === 'phone' ? '14px' : '15px';
-  const inputFontSize = deviceType === 'phone' ? '16px' : '15px';
-  const sendButtonPadding = deviceType === 'phone' ? '14px 20px' : '12px 24px';
-  const sidebarStyle = deviceType === 'phone' ? styles.sidebarPhone : styles.sidebar;
+  const filteredGroups = groups.filter(g => g.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredChannels = channels.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
+
+  const hasChatSelected = !!(selectedUser || selectedGroup || selectedChannel);
+
+  // Incoming caller lookup
+  const incomingCaller = incomingCall ? users.find(u => u.id.toString() === incomingCall.from) : null;
 
   return (
-    <div style={styles.container}>
-      {showDevicePrompt && <DevicePrompt onSelect={handleDeviceSelect} />}
-
+    <div
+      style={{
+        display: 'flex',
+        height: '100vh',
+        width: '100vw',
+        overflow: 'hidden',
+        backgroundColor: 'var(--bg-color)',
+        color: 'var(--text-primary)',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      }}
+    >
       <UpdateBanner />
+
+      {/* Модальное окно входящего звонка с музыкой и аватаром */}
       {incomingCall && !currentCall && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 1000,
-        }}>
-          <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }} style={{
-            background: 'var(--sidebar-bg)', padding: 30, borderRadius: 24,
-            textAlign: 'center',
-          }}>
-            <h3>📞 Входящий звонок</h3>
-            <p>{incomingCall.from}</p>
-            <button onClick={acceptCall} style={{ marginRight: 16, padding: '10px 24px', borderRadius: 40, background: '#4caf50', color: 'white', border: 'none' }}>Принять</button>
-            <button onClick={declineCall} style={{ padding: '10px 24px', borderRadius: 40, background: '#f44336', color: 'white', border: 'none' }}>Отклонить</button>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.65)',
+            backdropFilter: 'blur(10px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 6000,
+          }}
+        >
+          <motion.div
+            initial={{ scale: 0.85, y: 20 }}
+            animate={{ scale: 1, y: 0 }}
+            style={{
+              backgroundColor: 'var(--sidebar-bg)',
+              border: '1px solid var(--border-color)',
+              padding: '36px 32px',
+              borderRadius: '28px',
+              textAlign: 'center',
+              boxShadow: '0 24px 60px rgba(0,0,0,0.3)',
+              maxWidth: '380px',
+              width: '90%',
+            }}
+          >
+            <motion.div
+              animate={{ scale: [1, 1.08, 1] }}
+              transition={{ repeat: Infinity, duration: 1.8 }}
+              style={{ display: 'inline-block', marginBottom: 16 }}
+            >
+              <Avatar src={incomingCaller?.avatar} name={incomingCaller?.username || `ID ${incomingCall.from}`} size={84} />
+            </motion.div>
+            <h3 style={{ fontSize: 20, fontWeight: 700, margin: '0 0 6px' }}>Входящий звонок</h3>
+            <p style={{ fontSize: 16, color: 'var(--text-secondary)', margin: '0 0 24px' }}>
+              {incomingCaller?.username || `Пользователь #${incomingCall.from}`}
+            </p>
+            <div style={{ display: 'flex', gap: 16, justifyContent: 'center' }}>
+              <button
+                onClick={acceptCall}
+                style={{
+                  padding: '12px 28px',
+                  borderRadius: '30px',
+                  backgroundColor: '#22c55e',
+                  color: 'white',
+                  border: 'none',
+                  fontWeight: 600,
+                  fontSize: 15,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 14px rgba(34, 197, 94, 0.4)',
+                }}
+              >
+                📞 Ответить
+              </button>
+              <button
+                onClick={declineCall}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: '30px',
+                  backgroundColor: '#ef4444',
+                  color: 'white',
+                  border: 'none',
+                  fontWeight: 600,
+                  fontSize: 15,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 14px rgba(239, 68, 68, 0.4)',
+                }}
+              >
+                Отклонить
+              </button>
+            </div>
           </motion.div>
         </motion.div>
       )}
+
+      {/* Окно активного звонка */}
       {currentCall && (
         <CallWindow
-          localStream={localStream} remoteStream={remoteStream} onHangUp={hangUp}
-          onToggleAudio={() => { if (localStream) { localStream.getAudioTracks().forEach(t => t.enabled = !t.enabled); setAudioEnabled(prev => !prev); } }}
-          onToggleVideo={() => { if (localStream) { localStream.getVideoTracks().forEach(t => t.enabled = !t.enabled); setVideoEnabled(prev => !prev); } }}
-          onShareScreen={onShareScreen} audioEnabled={audioEnabled} videoEnabled={videoEnabled} screenStream={screenStream}
+          localStream={localStream}
+          remoteStream={remoteStream}
+          onHangUp={hangUp}
+          onToggleAudio={() => {
+            if (localStream) {
+              localStream.getAudioTracks().forEach(t => (t.enabled = !t.enabled));
+              setAudioEnabled(prev => !prev);
+            }
+          }}
+          onToggleVideo={() => {
+            if (localStream) {
+              localStream.getVideoTracks().forEach(t => (t.enabled = !t.enabled));
+              setVideoEnabled(prev => !prev);
+            }
+          }}
+          onShareScreen={onShareScreen}
+          audioEnabled={audioEnabled}
+          videoEnabled={videoEnabled}
+          screenStream={screenStream}
           localAvatar={currentUser.avatar || localStorage.getItem('avatar')}
-          remoteAvatar={selectedUser?.avatar || null}
+          remoteAvatar={selectedUser?.avatar || undefined}
+          remoteName={selectedUser?.username || 'Собеседник'}
+          isVideoCall={isVideoCall}
         />
       )}
 
-      {/* Боковая панель */}
-      {(showSidebar || deviceType !== 'phone') && (
-        <motion.div
-          initial={deviceType === 'phone' ? { x: -300 } : false}
-          animate={{ x: 0 }}
-          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-          style={sidebarStyle}
-        >
-          <div style={styles.sidebarHeader}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <h2 style={styles.sidebarTitle}>💬 CBEF</h2>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {isAdmin && <button onClick={() => setShowAdmin(true)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer' }} title="Админ-панель">🛡️</button>}
-                <button onClick={() => setShowAddFriend(true)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer' }}>👤+</button>
-                <button onClick={() => setShowGroupCreator(true)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer' }}>👥</button>
-                <button onClick={() => setShowChannelSearch(true)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer' }}>🔍</button>
-                <button onClick={() => setShowChannelCreator(true)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer' }}>📢</button>
-                <button onClick={openDevicePrompt} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer' }} title="Сменить устройство">🔄</button>
+      {/* ЛЕВАЯ КОЛОНКА (СПИСОК ЧАТОВ) */}
+      <div
+        style={{
+          width: isMobile ? '100%' : '350px',
+          minWidth: isMobile ? '100%' : '320px',
+          maxWidth: isMobile ? '100%' : '400px',
+          height: '100vh',
+          display: isMobile && hasChatSelected ? 'none' : 'flex',
+          flexDirection: 'column',
+          backgroundColor: 'var(--sidebar-bg)',
+          borderRight: '1px solid var(--border-color)',
+          zIndex: 10,
+        }}
+      >
+        {/* Шапка сайдбара */}
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--header-bg)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div
+                onClick={() => navigate('/settings')}
+                style={{ cursor: 'pointer' }}
+                title="Перейти в настройки"
+              >
+                <Avatar src={currentUser.avatar || localStorage.getItem('avatar')} name={currentUser.username} size={38} />
               </div>
-            </div>
-            <p style={{ margin: '4px 0 0', fontSize: 14, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
-              <span>{currentUser.username} {isPremium && '💎'}</span>
-              <button onClick={() => window.location.hash = '#/settings'} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--text-secondary)' }}>⚙️</button>
-            </p>
-          </div>
-          <FriendRequests token={token!} onAccept={() => setRefreshContacts(prev => prev + 1)} />
-          <div style={styles.contactList}>
-            {displayedContacts.map(user => (
-              <div key={user.id} style={{ ...styles.contactItem, backgroundColor: selectedUser?.id === user.id ? 'var(--hover-bg)' : 'transparent' }} onClick={() => { setSelectedUser(user); setSelectedGroup(null); setSelectedChannel(null); }}>
-                <div style={styles.contactInfo}>
-                  <span style={onlineUsers.has(user.id) ? styles.onlineDot : styles.offlineDot} />
-                  <Avatar src={user.avatar} name={user.username} size={40} />
-                  <span style={styles.contactName}>{user.username} {user.premium && '💎'}</span>
-                  {unreadCounts[user.id] > 0 && <div style={styles.badge}>{unreadCounts[user.id]}</div>}
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 17, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {currentUser.username} {isPremium && '⭐'}
                 </div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>CBEF Messenger</div>
               </div>
-            ))}
-            {groups.map(group => (
-              <div key={group.id} style={{ ...styles.contactItem, backgroundColor: selectedGroup?.id === group.id ? 'var(--hover-bg)' : 'transparent' }} onClick={() => { setSelectedGroup(group); setSelectedUser(null); setSelectedChannel(null); }}>
-                <div style={styles.contactInfo}><span style={{ fontSize: 20 }}>👥</span><span style={styles.contactName}>{group.name}</span></div>
-              </div>
-            ))}
-            {channels.map(channel => (
-              <div key={channel.id} style={{ ...styles.contactItem, backgroundColor: selectedChannel?.id === channel.id ? 'var(--hover-bg)' : 'transparent' }} onClick={() => { setSelectedChannel(channel); setSelectedUser(null); setSelectedGroup(null); }}>
-                <div style={styles.contactInfo}><span style={{ fontSize: 20 }}>📢</span><span style={styles.contactName}>{channel.name}</span></div>
-              </div>
-            ))}
-            <div style={{ ...styles.contactItem, justifyContent: 'center', color: 'var(--text-secondary)' }} onClick={() => alert('Создание ботов скоро появится!')}>
-              <span>🤖 Создать бота</span>
+            </div>
+
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              {isAdmin && (
+                <button
+                  onClick={() => setShowAdmin(true)}
+                  style={topIconBtn}
+                  title="Панель администратора"
+                >
+                  🛡️
+                </button>
+              )}
+              <button onClick={() => setShowAddFriend(true)} style={topIconBtn} title="Добавить друга">
+                👤+
+              </button>
+              <button onClick={() => setShowGroupCreator(true)} style={topIconBtn} title="Создать группу">
+                👥
+              </button>
+              <button onClick={() => setShowChannelCreator(true)} style={topIconBtn} title="Создать канал">
+                📢
+              </button>
+              <button onClick={() => navigate('/settings')} style={topIconBtn} title="Настройки">
+                ⚙️
+              </button>
             </div>
           </div>
-        </motion.div>
-      )}
 
-      {/* Чат */}
-      <div style={styles.chatArea}>
-        {selectedUser || selectedGroup || selectedChannel ? (
+          {/* Строка поиска */}
+          <div style={{ position: 'relative' }}>
+            <input
+              style={{
+                width: '100%',
+                padding: '9px 14px 9px 34px',
+                borderRadius: '18px',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--input-bg)',
+                color: 'var(--text-primary)',
+                fontSize: 14,
+                outline: 'none',
+              }}
+              placeholder="Поиск чатов и каналов..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
+            <span style={{ position: 'absolute', left: 12, top: 9, color: 'var(--text-secondary)', fontSize: 14 }}>🔍</span>
+          </div>
+
+          {/* Вкладки: Все / Личные / Группы / Каналы */}
+          <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+            {[
+              { id: 'all', label: 'Все' },
+              { id: 'direct', label: 'Личные' },
+              { id: 'groups', label: 'Группы' },
+              { id: 'channels', label: 'Каналы' },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                style={{
+                  flex: 1,
+                  padding: '5px 0',
+                  borderRadius: '12px',
+                  border: 'none',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  backgroundColor: activeTab === tab.id ? 'var(--button-bg)' : 'transparent',
+                  color: activeTab === tab.id ? 'var(--button-text)' : 'var(--text-secondary)',
+                  transition: 'background-color 0.15s',
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Заявки в друзья */}
+        <FriendRequests token={token!} onAccept={() => setRefreshContacts(prev => prev + 1)} />
+
+        {/* Список диалогов */}
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {/* Личные чаты */}
+          {(activeTab === 'all' || activeTab === 'direct') &&
+            filteredContacts.map(user => {
+              const isSelected = selectedUser?.id === user.id;
+              const isOnline = onlineUsers.has(user.id);
+              return (
+                <div
+                  key={`user-${user.id}`}
+                  onClick={() => {
+                    setSelectedUser(user);
+                    setSelectedGroup(null);
+                    setSelectedChannel(null);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '12px 18px',
+                    cursor: 'pointer',
+                    borderBottom: '1px solid var(--border-color)',
+                    backgroundColor: isSelected ? 'var(--active-chat-bg)' : 'transparent',
+                    transition: 'background-color 0.15s',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ position: 'relative' }}>
+                      <Avatar src={user.avatar} name={user.username} size={44} />
+                      <span
+                        style={{
+                          position: 'absolute',
+                          bottom: 0,
+                          right: 0,
+                          width: 12,
+                          height: 12,
+                          borderRadius: '50%',
+                          backgroundColor: isOnline ? '#22c55e' : '#94a3b8',
+                          border: '2px solid var(--sidebar-bg)',
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 15, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {user.username} {user.premium && '⭐'}
+                      </div>
+                      <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                        {isOnline ? 'в сети' : 'был(а) недавно'}
+                      </div>
+                    </div>
+                  </div>
+                  {unreadCounts[user.id] > 0 && (
+                    <div
+                      style={{
+                        backgroundColor: '#0084ff',
+                        color: 'white',
+                        borderRadius: '12px',
+                        padding: '2px 8px',
+                        fontSize: 12,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {unreadCounts[user.id]}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+          {/* Группы */}
+          {(activeTab === 'all' || activeTab === 'groups') &&
+            filteredGroups.map(group => {
+              const isSelected = selectedGroup?.id === group.id;
+              return (
+                <div
+                  key={`group-${group.id}`}
+                  onClick={() => {
+                    setSelectedGroup(group);
+                    setSelectedUser(null);
+                    setSelectedChannel(null);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '12px 18px',
+                    cursor: 'pointer',
+                    borderBottom: '1px solid var(--border-color)',
+                    backgroundColor: isSelected ? 'var(--active-chat-bg)' : 'transparent',
+                    transition: 'background-color 0.15s',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: '50%',
+                      backgroundColor: 'rgba(0, 132, 255, 0.15)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 22,
+                    }}
+                  >
+                    👥
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>{group.name}</div>
+                    <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Групповой чат</div>
+                  </div>
+                </div>
+              );
+            })}
+
+          {/* Каналы */}
+          {(activeTab === 'all' || activeTab === 'channels') &&
+            filteredChannels.map(channel => {
+              const isSelected = selectedChannel?.id === channel.id;
+              return (
+                <div
+                  key={`channel-${channel.id}`}
+                  onClick={() => {
+                    setSelectedChannel(channel);
+                    setSelectedUser(null);
+                    setSelectedGroup(null);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '12px 18px',
+                    cursor: 'pointer',
+                    borderBottom: '1px solid var(--border-color)',
+                    backgroundColor: isSelected ? 'var(--active-chat-bg)' : 'transparent',
+                    transition: 'background-color 0.15s',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: '50%',
+                      backgroundColor: 'rgba(234, 88, 12, 0.15)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 22,
+                    }}
+                  >
+                    📢
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>{channel.name}</div>
+                    <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Канал</div>
+                  </div>
+                </div>
+              );
+            })}
+
+          {filteredContacts.length === 0 && filteredGroups.length === 0 && filteredChannels.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '30px 20px', color: 'var(--text-secondary)', fontSize: 14 }}>
+              Чатов пока нет. Нажмите 👤+ чтобы добавить друзей или 📢 чтобы подписаться на канал!
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ПРАВАЯ ОБЛАСТЬ (АКТИВНЫЙ ЧАТ) */}
+      <div
+        style={{
+          flex: 1,
+          height: '100vh',
+          display: isMobile && !hasChatSelected ? 'none' : 'flex',
+          flexDirection: 'column',
+          backgroundColor: 'var(--chat-bg)',
+          backgroundImage: 'var(--chat-pattern)',
+          backgroundSize: '24px 24px',
+          position: 'relative',
+        }}
+      >
+        {hasChatSelected ? (
           <>
-            <div style={styles.chatHeader}>
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <button style={styles.backButton} onClick={handleBackToContacts}>←</button>
-                <h3 style={styles.chatHeaderTitle}>
-                  {selectedUser ? selectedUser.username : selectedGroup?.name || selectedChannel?.name}
-                  {selectedUser && <span style={{ marginLeft: 8, fontSize: 14, fontWeight: 400 }}>{onlineUsers.has(selectedUser.id) ? '🟢 онлайн' : '⚫ офлайн'}</span>}
-                  {selectedUser && selectedUser.premium && <span style={{ marginLeft: 4 }}>💎</span>}
-                  {selectedChannel && <span style={{ marginLeft: 8, fontSize: 14, fontWeight: 400, color: 'var(--text-secondary)' }}>{channelSubscribersCount} подписчиков</span>}
-                </h3>
-              </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                {selectedUser && (
-                  <button onClick={() => { setProfileUserId(selectedUser.id); setShowProfile(true); }} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }} title="Профиль">👤</button>
+            {/* Шапка чата */}
+            <div
+              style={{
+                padding: '12px 20px',
+                backgroundColor: 'var(--header-bg)',
+                borderBottom: '1px solid var(--border-color)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                zIndex: 5,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                {isMobile && (
+                  <button
+                    onClick={handleBackToList}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      fontSize: 22,
+                      cursor: 'pointer',
+                      color: 'var(--text-primary)',
+                      padding: '4px 8px 4px 0',
+                    }}
+                  >
+                    ←
+                  </button>
+                )}
+
+                {selectedUser && <Avatar src={selectedUser.avatar} name={selectedUser.username} size={42} />}
+                {selectedGroup && (
+                  <div style={{ width: 42, height: 42, borderRadius: '50%', backgroundColor: 'rgba(0,132,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
+                    👥
+                  </div>
                 )}
                 {selectedChannel && (
-                  <button onClick={copyChannelInviteLink} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }} title="Пригласить">📎</button>
+                  <div style={{ width: 42, height: 42, borderRadius: '50%', backgroundColor: 'rgba(234,88,12,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
+                    📢
+                  </div>
                 )}
-                {!currentCall ? <button style={styles.callButton} onClick={startCall}>📞 Видеозвонок</button> : <button style={styles.hangUpButton} onClick={hangUp}>❌ Завершить</button>}
+
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 16 }}>
+                    {selectedUser ? selectedUser.username : selectedGroup ? selectedGroup.name : selectedChannel?.name}
+                    {selectedUser?.premium && ' ⭐'}
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                    {selectedUser && (onlineUsers.has(selectedUser.id) ? '🟢 в сети' : '⚫ не в сети')}
+                    {selectedGroup && 'групповой чат'}
+                    {selectedChannel && `${channelSubscribersCount} подписчиков`}
+                  </div>
+                </div>
+              </div>
+
+              {/* Кнопки звонков и действий в шапке */}
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                {/* ЗВОНКИ ТОЛЬКО В ЛИЧНЫХ ЧАТАХ (в каналах и группах звонки отключены) */}
+                {selectedUser && !currentCall && (
+                  <>
+                    <button
+                      onClick={() => startCall(false)}
+                      title="Аудиозвонок"
+                      style={callBtnStyle}
+                    >
+                      📞
+                    </button>
+                    <button
+                      onClick={() => startCall(true)}
+                      title="Видеозвонок"
+                      style={callBtnStyle}
+                    >
+                      📹
+                    </button>
+                  </>
+                )}
+
+                {selectedUser && (
+                  <button
+                    onClick={() => {
+                      setProfileUserId(selectedUser.id);
+                      setShowProfile(true);
+                    }}
+                    title="Профиль"
+                    style={topIconBtn}
+                  >
+                    ℹ️
+                  </button>
+                )}
+
+                {selectedChannel && (
+                  <button onClick={copyChannelInviteLink} title="Скопировать ссылку-приглашение" style={topIconBtn}>
+                    🔗
+                  </button>
+                )}
               </div>
             </div>
-            <div style={styles.messagesContainer}>
+
+            {/* Сообщения */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
               <AnimatePresence>
-                {(selectedUser ? messages : selectedGroup ? groupMessages : channelMessages).map(msg => (
-                  <motion.div key={msg.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} style={{ ...styles.messageRow, justifyContent: msg.sender_id === currentUser.id ? 'flex-end' : 'flex-start' }}>
-                    {msg.sender_id !== currentUser.id && <Avatar src={selectedUser?.avatar} name={selectedUser?.username} size={32} />}
-                    <div style={{
-                      ...styles.messageBubble,
-                      ...(msg.sender_id === currentUser.id ? styles.messageOwn : styles.messageOther),
-                      maxWidth: messageMaxWidth,
-                      fontSize: messageFontSize,
-                    }}>
-                      {msg.image ? (
-                        (msg.image.startsWith('data:image') || msg.image.startsWith('http')) ? (
-                          <img src={msg.image} alt="sent" style={{ maxWidth: '128px', maxHeight: '128px', borderRadius: 12, marginBottom: 4, cursor: 'pointer' }} onClick={() => setSelectedImage(msg.image)} />
-                        ) : (
-                          <span>{msg.image}</span>
-                        )
-                      ) : null}
-                      {msg.audio && <audio controls src={msg.audio} style={{ maxWidth: 200 }} />}
-                      {msg.text}
-                      {msg.status && (
-                        <span style={{ fontSize: 12, marginLeft: 8, opacity: 0.7 }}>
-                          {msg.status === 'sent' && '✓'}
-                          {msg.status === 'delivered' && '✓✓'}
-                          {msg.status === 'read' && <span style={{ color: '#4a9eff' }}>✓✓</span>}
-                        </span>
-                      )}
-                    </div>
-                  </motion.div>
-                ))}
+                {(selectedUser ? messages : selectedGroup ? groupMessages : channelMessages).map(msg => {
+                  const isOwn = msg.sender_id === currentUser.id;
+                  return (
+                    <motion.div
+                      key={msg.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.15 }}
+                      style={{
+                        display: 'flex',
+                        justifyContent: isOwn ? 'flex-end' : 'flex-start',
+                        gap: 8,
+                        alignItems: 'flex-end',
+                      }}
+                    >
+                      {!isOwn && selectedUser && <Avatar src={selectedUser.avatar} name={selectedUser.username} size={30} />}
+                      <div
+                        style={{
+                          maxWidth: isMobile ? '82%' : '65%',
+                          padding: '10px 16px',
+                          borderRadius: isOwn ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                          backgroundColor: isOwn ? 'var(--message-own-bg)' : 'var(--message-other-bg)',
+                          color: isOwn ? 'var(--message-own-text)' : 'var(--message-other-text)',
+                          boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
+                          wordBreak: 'break-word',
+                          fontSize: 15,
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        {msg.image && (
+                          <img
+                            src={msg.image}
+                            alt="attached"
+                            onClick={() => setSelectedImage(msg.image!)}
+                            style={{
+                              maxWidth: '100%',
+                              maxHeight: '260px',
+                              borderRadius: '12px',
+                              marginBottom: 6,
+                              cursor: 'pointer',
+                              display: 'block',
+                            }}
+                          />
+                        )}
+                        {msg.audio && <audio controls src={msg.audio} style={{ width: '220px', marginBottom: 4 }} />}
+                        <div>{msg.text}</div>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            marginTop: 4,
+                            textAlign: 'right',
+                            opacity: 0.7,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'flex-end',
+                            gap: 4,
+                          }}
+                        >
+                          {msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                          {isOwn && (
+                            <span>
+                              {msg.status === 'read' ? '✓✓' : msg.status === 'delivered' ? '✓✓' : '✓'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
               </AnimatePresence>
               <div ref={messagesEndRef} />
             </div>
-            <div style={styles.inputContainer}>
-              <input type="file" accept="image/*" ref={fileInputRef} style={{ display: 'none' }} onChange={handleImageUpload} />
-              <button style={styles.iconButton} onClick={() => setShowAttachment(!showAttachment)}>📎</button>
+
+            {/* Ввод сообщения */}
+            <div
+              style={{
+                padding: '12px 18px',
+                backgroundColor: 'var(--header-bg)',
+                borderTop: '1px solid var(--border-color)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                position: 'relative',
+              }}
+            >
+              <input
+                type="file"
+                accept="image/*"
+                ref={fileInputRef}
+                style={{ display: 'none' }}
+                onChange={handleImageUpload}
+              />
+              <button
+                onClick={() => setShowAttachment(!showAttachment)}
+                style={iconActionBtn}
+                title="Прикрепить"
+              >
+                📎
+              </button>
+
               {showAttachment && (
-                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} style={styles.attachmentMenu}>
-                  <button style={styles.iconButton} onClick={() => fileInputRef.current?.click()}>🖼️</button>
-                  <button style={styles.iconButton} onClick={() => setShowStickerPack(true)}>📦</button>
-                  <button style={styles.iconButton} onClick={() => setShowStickers(!showStickers)}>😀</button>
-                  <button style={styles.iconButton} onClick={() => setShowStickerManager(true)}>🖼️+</button>
-                  {recording ? <button style={styles.iconButton} onClick={stopRecording}>⏹️</button> : <button style={styles.iconButton} onClick={startRecording}>🎤</button>}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  style={{
+                    position: 'absolute',
+                    bottom: 60,
+                    left: 20,
+                    backgroundColor: 'var(--sidebar-bg)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 18,
+                    padding: 8,
+                    display: 'flex',
+                    gap: 8,
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+                    zIndex: 20,
+                  }}
+                >
+                  <button style={iconActionBtn} onClick={() => fileInputRef.current?.click()} title="Фотография">
+                    🖼️
+                  </button>
+                  <button style={iconActionBtn} onClick={() => setShowStickerPack(true)} title="Стикеры">
+                    📦
+                  </button>
+                  <button style={iconActionBtn} onClick={() => setShowStickers(!showStickers)} title="Эмодзи">
+                    😀
+                  </button>
+                  {recording ? (
+                    <button style={{ ...iconActionBtn, backgroundColor: '#ef4444', color: 'white' }} onClick={stopRecording}>
+                      ⏹️
+                    </button>
+                  ) : (
+                    <button style={iconActionBtn} onClick={startRecording} title="Голосовое сообщение">
+                      🎤
+                    </button>
+                  )}
                 </motion.div>
               )}
-              <button style={styles.iconButton} onClick={() => setShowEmoji(!showEmoji)}>😊</button>
-              <button style={styles.ttlButton} onClick={cycleTtl} title="Таймер самоудаления">
+
+              <button onClick={() => setShowEmoji(!showEmoji)} style={iconActionBtn} title="Смайлики">
+                😊
+              </button>
+
+              <button onClick={cycleTtl} style={iconActionBtn} title="Самоудаление сообщения">
                 {ttl === 0 ? '⏱️' : ttl === 60 ? '1м' : ttl === 300 ? '5м' : '1ч'}
               </button>
-              <input style={{ ...styles.input, fontSize: inputFontSize }} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder="Сообщение" />
-              <button style={{ ...styles.sendButton, padding: sendButtonPadding }} onClick={() => sendMessage()}>Отправить</button>
+
+              <input
+                style={{
+                  flex: 1,
+                  padding: '12px 18px',
+                  borderRadius: '24px',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--input-bg)',
+                  color: 'var(--text-primary)',
+                  fontSize: 15,
+                  outline: 'none',
+                }}
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                placeholder="Напишите сообщение..."
+              />
+
+              <button
+                onClick={() => sendMessage()}
+                style={{
+                  padding: '12px 22px',
+                  borderRadius: '24px',
+                  backgroundColor: '#0084ff',
+                  color: 'white',
+                  border: 'none',
+                  fontWeight: 600,
+                  fontSize: 15,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(0, 132, 255, 0.3)',
+                }}
+              >
+                Отправить
+              </button>
             </div>
-            {showEmoji && <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ position: 'absolute', bottom: 90, right: 20, zIndex: 30 }}><EmojiPicker onEmojiClick={(e) => setInput(prev => prev + e.emoji)} /></motion.div>}
-            {showStickers && (
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ ...styles.attachmentMenu, bottom: 130 }}>
-                <div style={styles.stickerGrid}>
-                  {stickers.map(s => <div key={s} style={styles.sticker} onClick={() => sendSticker(s)}>{s}</div>)}
-                </div>
-              </motion.div>
+
+            {/* Эмодзи пикер */}
+            {showEmoji && (
+              <div style={{ position: 'absolute', bottom: 70, right: 20, zIndex: 40 }}>
+                <EmojiPicker onEmojiClick={e => setInput(prev => prev + e.emoji)} />
+              </div>
             )}
-            {showStickerManager && <StickerManager onSendSticker={(url) => { sendSticker(url); }} onClose={() => setShowStickerManager(false)} />}
-            {showStickerPack && <StickerPackViewer onSelectSticker={(url) => { sendSticker(url); }} onClose={() => setShowStickerPack(false)} />}
+
+            {/* Стикеры сетка */}
+            {showStickers && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 70,
+                  left: 20,
+                  backgroundColor: 'var(--sidebar-bg)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 16,
+                  padding: 10,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+                  zIndex: 40,
+                }}
+              >
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                  {stickers.map(s => (
+                    <div
+                      key={s}
+                      onClick={() => sendSticker(s)}
+                      style={{ fontSize: 26, cursor: 'pointer', padding: 6, textAlign: 'center' }}
+                    >
+                      {s}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {showStickerPack && (
+              <StickerPackViewer onSelectSticker={sendSticker} onClose={() => setShowStickerPack(false)} />
+            )}
+            {showStickerManager && (
+              <StickerManager onSendSticker={sendSticker} onClose={() => setShowStickerManager(false)} />
+            )}
           </>
         ) : (
-          <div style={styles.emptyChat}>Выберите контакт, группу или канал</div>
+          /* Пустой экран, когда ни один чат не выбран */
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 24,
+              textAlign: 'center',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            <div
+              style={{
+                width: 90,
+                height: 90,
+                borderRadius: '50%',
+                backgroundColor: 'rgba(0, 132, 255, 0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 44,
+                marginBottom: 16,
+              }}
+            >
+              💬
+            </div>
+            <h3 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 8px', color: 'var(--text-primary)' }}>
+              Добро пожаловать в CBEF
+            </h3>
+            <p style={{ maxWidth: 360, fontSize: 15, margin: 0, lineHeight: 1.5 }}>
+              Выберите диалог, группу или канал из списка слева, чтобы начать общение.
+            </p>
+          </div>
         )}
       </div>
+
       <audio ref={remoteAudioRef} autoPlay />
 
+      {/* Модалки */}
       {selectedImage && <ImageLightbox src={selectedImage} onClose={() => setSelectedImage(null)} />}
-      {showProfile && profileUserId && <ProfileModal userId={profileUserId} token={token!} onClose={() => setShowProfile(false)} />}
-
+      {showProfile && profileUserId && (
+        <ProfileModal userId={profileUserId} token={token!} onClose={() => setShowProfile(false)} />
+      )}
       {showAddFriend && <AddFriend token={token!} onClose={() => setShowAddFriend(false)} />}
-      {showGroupCreator && <GroupCreator token={token!} onClose={() => setShowGroupCreator(false)} onCreated={() => setRefreshContacts(prev => prev + 1)} />}
-      {showChannelCreator && <ChannelCreator token={token!} onClose={() => setShowChannelCreator(false)} onCreated={() => setRefreshContacts(prev => prev + 1)} />}
-      {showChannelSearch && <ChannelSearch token={token!} onClose={() => setShowChannelSearch(false)} onSubscribed={() => setRefreshContacts(prev => prev + 1)} />}
+      {showGroupCreator && (
+        <GroupCreator token={token!} onClose={() => setShowGroupCreator(false)} onCreated={() => setRefreshContacts(p => p + 1)} />
+      )}
+      {showChannelCreator && (
+        <ChannelCreator token={token!} onClose={() => setShowChannelCreator(false)} onCreated={() => setRefreshContacts(p => p + 1)} />
+      )}
+      {showChannelSearch && (
+        <ChannelSearch token={token!} onClose={() => setShowChannelSearch(false)} onSubscribed={() => setRefreshContacts(p => p + 1)} />
+      )}
       {showAdmin && <AdminPanel token={token!} onClose={() => setShowAdmin(false)} />}
     </div>
   );
 }
+
+const topIconBtn: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  fontSize: 18,
+  cursor: 'pointer',
+  padding: 6,
+  borderRadius: 8,
+  color: 'var(--text-secondary)',
+};
+
+const iconActionBtn: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  fontSize: 20,
+  cursor: 'pointer',
+  padding: 8,
+  borderRadius: '50%',
+  color: 'var(--text-secondary)',
+};
+
+const callBtnStyle: React.CSSProperties = {
+  backgroundColor: 'rgba(0, 132, 255, 0.12)',
+  color: '#0084ff',
+  border: 'none',
+  borderRadius: '20px',
+  padding: '8px 14px',
+  fontSize: 18,
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  transition: 'background-color 0.15s',
+};

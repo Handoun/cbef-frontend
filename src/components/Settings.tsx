@@ -6,70 +6,123 @@ import Avatar from './Avatar';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-const styles: any = {
-  container: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #0F2027 0%, #2C5364 100%)', padding: 16 },
-  card: { background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(12px)', padding: 32, borderRadius: 32, boxShadow: '0 30px 50px rgba(0,0,0,0.2)', width: '100%', maxWidth: 500, color: '#1a1a1a' },
-  title: { fontSize: 28, fontWeight: 700, marginBottom: 24, textAlign: 'center', color: '#1F2A3E' },
-  avatarSection: { display: 'flex', alignItems: 'center', gap: 24, marginBottom: 28 },
-  fileInput: { display: 'none' },
-  uploadButton: { padding: '10px 18px', background: '#2C3E50', color: 'white', border: 'none', borderRadius: 30, cursor: 'pointer', fontWeight: 500 },
-  inputGroup: { marginBottom: 20 },
-  label: { display: 'block', marginBottom: 6, fontWeight: 500, color: '#2C3E50' },
-  input: { width: '100%', padding: 14, border: '1px solid #ddd', borderRadius: 40, fontSize: 16, backgroundColor: 'white' },
-  themeToggle: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
-  themeButton: { padding: '10px 20px', backgroundColor: '#2C3E50', color: 'white', border: 'none', borderRadius: 30, cursor: 'pointer' },
-  buttonGroup: { display: 'flex', gap: 12, marginTop: 30 },
-  saveButton: { flex: 1, padding: 14, backgroundColor: '#0084ff', color: 'white', border: 'none', borderRadius: 40, fontWeight: 600, cursor: 'pointer' },
-  cancelButton: { flex: 1, padding: 14, backgroundColor: '#e0e0e0', color: '#333', border: 'none', borderRadius: 40, fontWeight: 600, cursor: 'pointer' },
-  logoutButton: { width: '100%', padding: 14, marginTop: 20, backgroundColor: '#ff4d4f', color: 'white', border: 'none', borderRadius: 40, fontWeight: 600, cursor: 'pointer' },
-  subBlock: { marginTop: 20, padding: 16, border: '1px solid #ddd', borderRadius: 20, background: '#f9f9f9' },
-  themeOption: { marginRight: 8, padding: '6px 12px', borderRadius: 20, border: '1px solid #ccc', background: 'white', cursor: 'pointer' },
-};
-
 export default function Settings() {
   const [username, setUsername] = useState('');
+  const [bio, setBio] = useState('');
   const [avatar, setAvatar] = useState<string | null>(null);
   const [theme, setTheme] = useState<string>('light');
   const [sessions, setSessions] = useState<any[]>([]);
   const [showSessions, setShowSessions] = useState(false);
   const [subscription, setSubscription] = useState<string | null>(null);
   const [premiumOnly, setPremiumOnly] = useState<boolean>(false);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-  const isPremiumUser = currentUser.premium === true;
+  const isPremiumUser = currentUser.is_premium === true || currentUser.premium === true;
 
   useEffect(() => {
     const userStr = localStorage.getItem('user');
     if (userStr) {
-      const user = JSON.parse(userStr);
-      setUsername(user.username);
+      try {
+        const user = JSON.parse(userStr);
+        setUsername(user.username || '');
+        setBio(user.bio || '');
+      } catch {}
     }
     const savedAvatar = localStorage.getItem('avatar');
     if (savedAvatar) setAvatar(savedAvatar);
+
     const savedTheme = localStorage.getItem('theme') || 'light';
     setTheme(savedTheme);
     document.documentElement.setAttribute('data-theme', savedTheme);
+
     if (token) {
-      axios.get(`${API_URL}/api/sessions`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(res => setSessions(res.data))
+      // Load current profile data
+      axios
+        .get(`${API_URL}/api/users/${currentUser.id}`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(res => {
+          if (res.data) {
+            if (res.data.username) setUsername(res.data.username);
+            if (res.data.bio !== undefined) setBio(res.data.bio || '');
+            if (res.data.avatar) {
+              setAvatar(res.data.avatar);
+              localStorage.setItem('avatar', res.data.avatar);
+            }
+            setPremiumOnly(res.data.premium_only_messages || false);
+          }
+        })
         .catch(console.error);
-      axios.get(`${API_URL}/api/subscription`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(res => setSubscription(res.data.subscription_until))
+
+      axios
+        .get(`${API_URL}/api/sessions`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(res => setSessions(res.data || []))
         .catch(console.error);
-      axios.get(`${API_URL}/api/users/${currentUser.id}`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(res => setPremiumOnly(res.data.premium_only_messages || false))
+
+      axios
+        .get(`${API_URL}/api/subscription`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(res => setSubscription(res.data?.subscription_until || null))
         .catch(console.error);
     }
   }, [token, currentUser.id]);
 
-  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => { /* без изменений */ };
-  const removeSession = async (id: number) => { /* без изменений */ };
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setMessage({ text: 'Размер фото не должен превышать 5МБ', type: 'error' });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result as string;
+      setAvatar(base64);
+      try {
+        await axios.post(
+          `${API_URL}/api/user/avatar`,
+          { avatar: base64 },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        localStorage.setItem('avatar', base64);
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        user.avatar = base64;
+        localStorage.setItem('user', JSON.stringify(user));
+        setMessage({ text: 'Аватар успешно обновлен!', type: 'success' });
+      } catch {
+        setMessage({ text: 'Не удалось сохранить аватар на сервере', type: 'error' });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeSession = async (id: number) => {
+    try {
+      await axios.delete(`${API_URL}/api/sessions/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setSessions(prev => prev.filter(s => s.id !== id));
+      setMessage({ text: 'Сессия завершена', type: 'success' });
+    } catch {
+      setMessage({ text: 'Ошибка при удалении сессии', type: 'error' });
+    }
+  };
 
   const togglePremiumOnly = async () => {
     const newVal = !premiumOnly;
     setPremiumOnly(newVal);
-    await axios.put(`${API_URL}/api/users/premium-only`, { enabled: newVal }, { headers: { Authorization: `Bearer ${token}` } });
+    try {
+      await axios.put(
+        `${API_URL}/api/users/premium-only`,
+        { enabled: newVal },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const changeTheme = (newTheme: string) => {
@@ -78,89 +131,339 @@ export default function Settings() {
     document.documentElement.setAttribute('data-theme', newTheme);
   };
 
-  const handleSave = async () => { /* без изменений */ };
-  const handleLogout = () => { /* без изменений */ };
+  const handleSave = async () => {
+    setLoading(true);
+    setMessage(null);
+    try {
+      const res = await axios.put(
+        `${API_URL}/api/users/profile`,
+        { username, bio },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data.user) {
+        localStorage.setItem('user', JSON.stringify(res.data.user));
+      } else {
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        user.username = username;
+        user.bio = bio;
+        localStorage.setItem('user', JSON.stringify(user));
+      }
+      setMessage({ text: 'Настройки успешно сохранены!', type: 'success' });
+      setTimeout(() => navigate('/chat'), 1000);
+    } catch (err: any) {
+      if (err.response?.status === 409) {
+        setMessage({ text: 'Это имя пользователя уже занято', type: 'error' });
+      } else {
+        setMessage({ text: 'Ошибка при сохранении профиля', type: 'error' });
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const themes = ['light', 'dark', 'ocean', 'forest', 'sunset'];
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('avatar');
+    navigate('/login', { replace: true });
+  };
+
+  const themes = [
+    { id: 'light', label: '☀️ Светлая' },
+    { id: 'dark', label: '🌙 Тёмная' },
+    { id: 'ocean', label: '🌊 Океан' },
+    { id: 'forest', label: '🌲 Лес' },
+    { id: 'sunset', label: '🌅 Закат' },
+  ];
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} style={styles.container}>
-      <div style={styles.card}>
-        <h2 style={styles.title}>⚙️ Настройки</h2>
+    <div
+      style={{
+        minHeight: '100vh',
+        backgroundColor: 'var(--bg-color)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '20px',
+        color: 'var(--text-primary)',
+        transition: 'all 0.2s',
+      }}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        style={{
+          width: '100%',
+          maxWidth: '520px',
+          backgroundColor: 'var(--sidebar-bg)',
+          border: '1px solid var(--border-color)',
+          borderRadius: '24px',
+          padding: '32px 28px',
+          boxShadow: '0 20px 40px rgba(0,0,0,0.1)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+          <button
+            onClick={() => navigate('/chat')}
+            style={{
+              background: 'none',
+              border: 'none',
+              fontSize: 22,
+              cursor: 'pointer',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            ←
+          </button>
+          <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Настройки профиля</h2>
+          <div style={{ width: 22 }} />
+        </div>
+
+        {message && (
+          <div
+            style={{
+              padding: '12px 16px',
+              borderRadius: '12px',
+              marginBottom: 20,
+              fontSize: 14,
+              fontWeight: 500,
+              backgroundColor: message.type === 'success' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+              color: message.type === 'success' ? '#16a34a' : '#ef4444',
+            }}
+          >
+            {message.text}
+          </div>
+        )}
 
         {/* Аватар */}
-        <div style={styles.avatarSection}>
-          {avatar ? <img src={avatar} alt="avatar" style={{ width: 100, height: 100, borderRadius: '50%', objectFit: 'cover' }} /> : <Avatar name={username} size={100} />}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 24 }}>
+          <div style={{ position: 'relative' }}>
+            <Avatar src={avatar || undefined} name={username} size={84} />
+          </div>
           <div>
-            <input type="file" accept="image/*" id="avatarUpload" style={styles.fileInput} onChange={handleAvatarChange} />
-            <label htmlFor="avatarUpload" style={styles.uploadButton}>Загрузить фото</label>
+            <input
+              type="file"
+              accept="image/*"
+              id="avatarUpload"
+              style={{ display: 'none' }}
+              onChange={handleAvatarChange}
+            />
+            <label
+              htmlFor="avatarUpload"
+              style={{
+                display: 'inline-block',
+                padding: '10px 18px',
+                borderRadius: '20px',
+                backgroundColor: 'var(--button-bg)',
+                color: 'var(--button-text)',
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'opacity 0.2s',
+              }}
+            >
+              📷 Сменить фото
+            </label>
           </div>
         </div>
 
-        {/* Имя */}
-        <div style={styles.inputGroup}>
-          <label style={styles.label}>Имя пользователя</label>
-          <input style={styles.input} value={username} onChange={e => setUsername(e.target.value)} />
+        {/* Имя пользователя */}
+        <div style={{ marginBottom: 18 }}>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+            ИМЯ ПОЛЬЗОВАТЕЛЯ
+          </label>
+          <input
+            style={{
+              width: '100%',
+              padding: '12px 16px',
+              borderRadius: '14px',
+              border: '1px solid var(--border-color)',
+              backgroundColor: 'var(--input-bg)',
+              color: 'var(--text-primary)',
+              fontSize: 15,
+              outline: 'none',
+              boxSizing: 'border-box',
+            }}
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            placeholder="Ваше имя"
+          />
         </div>
 
-        {/* Темы */}
-        <div style={styles.themeToggle}>
-          <span>Тема</span>
-          <div>
+        {/* О себе (Bio) */}
+        <div style={{ marginBottom: 22 }}>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+            О СЕБЕ
+          </label>
+          <textarea
+            style={{
+              width: '100%',
+              padding: '12px 16px',
+              borderRadius: '14px',
+              border: '1px solid var(--border-color)',
+              backgroundColor: 'var(--input-bg)',
+              color: 'var(--text-primary)',
+              fontSize: 15,
+              outline: 'none',
+              resize: 'none',
+              height: 80,
+              boxSizing: 'border-box',
+              fontFamily: 'inherit',
+            }}
+            value={bio}
+            onChange={e => setBio(e.target.value)}
+            placeholder="Расскажите немного о себе..."
+          />
+        </div>
+
+        {/* Тема оформления */}
+        <div style={{ marginBottom: 24 }}>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
+            ТЕМА ОФОРМЛЕНИЯ
+          </label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {themes.map(t => (
-              <button key={t} style={{ ...styles.themeOption, background: theme === t ? '#2C3E50' : 'white', color: theme === t ? 'white' : '#333' }} onClick={() => changeTheme(t)}>
-                {t === 'light' ? '☀️ Светлая' : t === 'dark' ? '🌙 Тёмная' : t === 'ocean' ? '🌊 Океан' : t === 'forest' ? '🌲 Лес' : '🌅 Закат'}
+              <button
+                key={t.id}
+                onClick={() => changeTheme(t.id)}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: '16px',
+                  border: theme === t.id ? '2px solid #0084ff' : '1px solid var(--border-color)',
+                  backgroundColor: theme === t.id ? 'rgba(0, 132, 255, 0.15)' : 'var(--input-bg)',
+                  color: theme === t.id ? '#0084ff' : 'var(--text-primary)',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {t.label}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Режим "писать только Premium" */}
-        {isPremiumUser && (
-          <div style={styles.themeToggle}>
-            <span>Принимать сообщения только от Premium</span>
-            <button style={styles.themeButton} onClick={togglePremiumOnly}>{premiumOnly ? 'Вкл' : 'Выкл'}</button>
+        {/* Подписка CBEF Premium */}
+        <div
+          style={{
+            padding: '16px',
+            borderRadius: '16px',
+            backgroundColor: 'var(--input-bg)',
+            border: '1px solid var(--border-color)',
+            marginBottom: 20,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontWeight: 600, fontSize: 15 }}>⭐ CBEF Premium</span>
+            <span style={{ fontSize: 12, padding: '4px 8px', borderRadius: 10, backgroundColor: isPremiumUser ? '#22c55e' : '#94a3b8', color: 'white' }}>
+              {isPremiumUser ? 'АКТИВНА' : 'НЕДОСТУПНА'}
+            </span>
           </div>
-        )}
-
-        {/* Устройства */}
-        <div style={styles.themeToggle}>
-          <span>Устройства</span>
-          <button style={styles.themeButton} onClick={() => setShowSessions(!showSessions)}>Показать</button>
-        </div>
-        {showSessions && (
-          <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 12, padding: 8 }}>
-            {sessions.map(s => (
-              <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <span>{s.device_info || 'Неизвестное устройство'}</span>
-                <button onClick={() => removeSession(s.id)} style={{ background: 'none', border: 'none', color: 'red', cursor: 'pointer' }}>Выйти</button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Подписка */}
-        <div style={styles.subBlock}>
-          <h4>Подписка CBEF Premium</h4>
           {subscription ? (
-            <p>Активна до: {new Date(subscription).toLocaleDateString()}</p>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+              Действует до: {new Date(subscription).toLocaleDateString()}
+            </div>
           ) : (
-            <p>Подписка не активна</p>
-          )}
-          {isPremiumUser ? (
-            <p style={{ fontSize: 14, color: '#0084ff' }}>Вы Premium. Спасибо за поддержку!</p>
-          ) : (
-            <p style={{ fontSize: 14, color: '#666' }}>Для оформления подписки обратитесь к администратору.</p>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+              Для оформления обратитесь к администратору.
+            </div>
           )}
         </div>
 
-        <div style={styles.buttonGroup}>
-          <button style={styles.saveButton} onClick={handleSave}>Сохранить</button>
-          <button style={styles.cancelButton} onClick={() => navigate('/chat')}>Отмена</button>
+        {/* Сессии */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>АКТИВНЫЕ УСТРОЙСТВА</span>
+            <button
+              onClick={() => setShowSessions(!showSessions)}
+              style={{ background: 'none', border: 'none', color: '#0084ff', fontSize: 13, cursor: 'pointer', fontWeight: 500 }}
+            >
+              {showSessions ? 'Скрыть' : `Показать (${sessions.length})`}
+            </button>
+          </div>
+
+          {showSessions && (
+            <div style={{ maxHeight: 150, overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 12, padding: 8 }}>
+              {sessions.length === 0 ? (
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)', textAlign: 'center', padding: 8 }}>Нет других активных сессий</div>
+              ) : (
+                sessions.map(s => (
+                  <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', borderBottom: '1px solid var(--border-color)' }}>
+                    <div style={{ fontSize: 13 }}>
+                      <div>{s.device || 'Браузер / Компьютер'}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{s.ip || ''}</div>
+                    </div>
+                    <button
+                      onClick={() => removeSession(s.id)}
+                      style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
+                    >
+                      Завершить
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
 
-        <button style={styles.logoutButton} onClick={handleLogout}>Выйти</button>
-      </div>
-    </motion.div>
+        {/* Кнопки сохранения и отмены */}
+        <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+          <button
+            onClick={handleSave}
+            disabled={loading}
+            style={{
+              flex: 1,
+              padding: '14px',
+              borderRadius: '24px',
+              backgroundColor: '#0084ff',
+              color: 'white',
+              border: 'none',
+              fontWeight: 600,
+              fontSize: 15,
+              cursor: 'pointer',
+              opacity: loading ? 0.7 : 1,
+            }}
+          >
+            {loading ? 'Сохранение...' : '💾 Сохранить'}
+          </button>
+          <button
+            onClick={() => navigate('/chat')}
+            style={{
+              padding: '14px 20px',
+              borderRadius: '24px',
+              backgroundColor: 'var(--input-bg)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-color)',
+              fontWeight: 600,
+              fontSize: 15,
+              cursor: 'pointer',
+            }}
+          >
+            Отмена
+          </button>
+        </div>
+
+        {/* Кнопка выхода */}
+        <button
+          onClick={handleLogout}
+          style={{
+            width: '100%',
+            padding: '12px',
+            borderRadius: '24px',
+            backgroundColor: 'transparent',
+            color: '#ef4444',
+            border: '1px solid #ef4444',
+            fontWeight: 600,
+            fontSize: 14,
+            cursor: 'pointer',
+            transition: 'background-color 0.2s',
+          }}
+        >
+          🚪 Выйти из аккаунта
+        </button>
+      </motion.div>
+    </div>
   );
 }
