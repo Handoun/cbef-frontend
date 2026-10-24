@@ -15,9 +15,13 @@ jobs:
           node-version: '22'
       - run: npm install
       - run: npm run build
-      - run: npm install -g @capacitor/cli
-      - run: npx cap add @capacitor-community/electron
-      - run: npx cap sync @capacitor-community/electron
+      - run: |
+          node -e "
+          const fs = require('fs');
+          if (!fs.existsSync('electron')) fs.mkdirSync('electron');
+          fs.writeFileSync('electron/package.json', JSON.stringify({main:'main.js',scripts:{start:'electron .',dist:'electron-builder'},build:{appId:'com.cbef.desktop',productName:'CBEF',directories:{output:'release'},win:{target:'nsis'},mac:{target:'dmg'},linux:{target:'AppImage'}},devDependencies:{electron:'^26.2.2','electron-builder':'^24.6.0'}}));
+          fs.writeFileSync('electron/main.js', \"const { app, BrowserWindow } = require('electron'); function createWindow() { const win = new BrowserWindow({ width: 1200, height: 800, webPreferences: { nodeIntegration: true, contextIsolation: false } }); win.loadURL('https://cbef.vercel.app'); } app.whenReady().then(createWindow);\");
+          "
       - run: cd electron && npm install
       - run: cd electron && npm run dist -- --win
       - uses: actions/upload-artifact@v4
@@ -34,9 +38,13 @@ jobs:
           node-version: '22'
       - run: npm install
       - run: npm run build
-      - run: npm install -g @capacitor/cli
-      - run: npx cap add @capacitor-community/electron
-      - run: npx cap sync @capacitor-community/electron
+      - run: |
+          node -e "
+          const fs = require('fs');
+          if (!fs.existsSync('electron')) fs.mkdirSync('electron');
+          fs.writeFileSync('electron/package.json', JSON.stringify({main:'main.js',scripts:{start:'electron .',dist:'electron-builder'},build:{appId:'com.cbef.desktop',productName:'CBEF',directories:{output:'release'},win:{target:'nsis'},mac:{target:'dmg'},linux:{target:'AppImage'}},devDependencies:{electron:'^26.2.2','electron-builder':'^24.6.0'}}));
+          fs.writeFileSync('electron/main.js', \"const { app, BrowserWindow } = require('electron'); function createWindow() { const win = new BrowserWindow({ width: 1200, height: 800, webPreferences: { nodeIntegration: true, contextIsolation: false } }); win.loadURL('https://cbef.vercel.app'); } app.whenReady().then(createWindow);\");
+          "
       - run: cd electron && npm install
       - run: cd electron && npm run dist -- --mac
       - uses: actions/upload-artifact@v4
@@ -53,9 +61,13 @@ jobs:
           node-version: '22'
       - run: npm install
       - run: npm run build
-      - run: npm install -g @capacitor/cli
-      - run: npx cap add @capacitor-community/electron
-      - run: npx cap sync @capacitor-community/electron
+      - run: |
+          node -e "
+          const fs = require('fs');
+          if (!fs.existsSync('electron')) fs.mkdirSync('electron');
+          fs.writeFileSync('electron/package.json', JSON.stringify({main:'main.js',scripts:{start:'electron .',dist:'electron-builder'},build:{appId:'com.cbef.desktop',productName:'CBEF',directories:{output:'release'},win:{target:'nsis'},mac:{target:'dmg'},linux:{target:'AppImage'}},devDependencies:{electron:'^26.2.2','electron-builder':'^24.6.0'}}));
+          fs.writeFileSync('electron/main.js', \"const { app, BrowserWindow } = require('electron'); function createWindow() { const win = new BrowserWindow({ width: 1200, height: 800, webPreferences: { nodeIntegration: true, contextIsolation: false } }); win.loadURL('https://cbef.vercel.app'); } app.whenReady().then(createWindow);\");
+          "
       - run: cd electron && npm install
       - run: cd electron && npm run dist -- --linux
       - uses: actions/upload-artifact@v4

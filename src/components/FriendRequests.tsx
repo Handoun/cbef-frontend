@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { motion } from 'framer-motion';
+import Avatar from './Avatar';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -41,7 +42,7 @@ export default function FriendRequests({ token, onAccept }: { token: string; onA
       {requests.map(req => (
         <motion.div key={req.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <img src={req.avatar || 'https://via.placeholder.com/30?text=?'} style={{ width: 30, height: 30, borderRadius: '50%' }} />
+            <Avatar src={req.avatar} name={req.username} size={30} />
             <span>{req.username}</span>
           </div>
           <div>
