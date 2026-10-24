@@ -408,6 +408,92 @@ export default function Settings() {
           )}
         </div>
 
+        {/* Разрешения: Микрофон, Камера, Уведомления */}
+        <div
+          style={{
+            padding: '16px',
+            borderRadius: '16px',
+            backgroundColor: 'var(--input-bg)',
+            border: '1px solid var(--border-color)',
+            marginBottom: 20,
+          }}
+        >
+          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 12 }}>
+            🔒 Разрешения приложения
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>Уведомления</div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                {typeof Notification !== 'undefined' && Notification.permission === 'granted'
+                  ? 'Включены'
+                  : 'Не разрешены'}
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                if (typeof Notification !== 'undefined') {
+                  const perm = await Notification.requestPermission();
+                  if (perm === 'granted') {
+                    setMessage({ text: 'Уведомления успешно включены!', type: 'success' });
+                  } else {
+                    setMessage({ text: 'Уведомления отклонены или заблокированы в настройках браузера/системы', type: 'error' });
+                  }
+                }
+              }}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '16px',
+                border: 'none',
+                backgroundColor: 'var(--button-bg)',
+                color: 'var(--button-text)',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              🔔 Разрешить
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>Микрофон и Камера</div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Для звонков и аудио</div>
+            </div>
+            <button
+              onClick={async () => {
+                try {
+                  const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+                  stream.getTracks().forEach(t => t.stop());
+                  setMessage({ text: 'Доступ к микрофону и камере подтверждён!', type: 'success' });
+                } catch {
+                  try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    stream.getTracks().forEach(t => t.stop());
+                    setMessage({ text: 'Доступ к микрофону подтверждён!', type: 'success' });
+                  } catch {
+                    setMessage({ text: 'Доступ заблокирован. Разрешите микрофон в настройках браузера или приложения', type: 'error' });
+                  }
+                }
+              }}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '16px',
+                border: 'none',
+                backgroundColor: 'var(--button-bg)',
+                color: 'var(--button-text)',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              🎙️ Запросить
+            </button>
+          </div>
+        </div>
+
         {/* Кнопки сохранения и отмены */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
           <button

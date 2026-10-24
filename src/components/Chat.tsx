@@ -228,6 +228,57 @@ export default function Chat() {
       alert('Ваш аккаунт заблокирован администратором.');
     });
 
+    newSocket.on('incoming_call', ({ from, callerName, callerAvatar, isVideo }: any) => {
+      setIncomingCall(prev => ({
+        call: prev?.call || null,
+        from: from.toString(),
+      }));
+      setIsVideoCall(isVideo !== false);
+      ringtone.startIncomingRingtone();
+
+      if (typeof Notification !== 'undefined') {
+        if (Notification.permission === 'granted') {
+          new Notification('📞 Входящий ' + (isVideo ? 'видеозвонок' : 'аудиозвонок'), {
+            body: (callerName || 'Пользователь') + ' звонит вам в CBEF',
+            icon: callerAvatar || undefined,
+            tag: 'cbef_call',
+          });
+        } else if (Notification.permission === 'default') {
+          Notification.requestPermission().then(perm => {
+            if (perm === 'granted') {
+              new Notification('📞 Входящий ' + (isVideo ? 'видеозвонок' : 'аудиозвонок'), {
+                body: (callerName || 'Пользователь') + ' звонит вам в CBEF',
+                icon: callerAvatar || undefined,
+                tag: 'cbef_call',
+              });
+            }
+          });
+        }
+      }
+    });
+
+    newSocket.on('call_response', ({ from, accepted }: any) => {
+      if (!accepted) {
+        ringtone.stop();
+        if (currentCall) {
+          currentCall.close();
+          setCurrentCall(null);
+        }
+        stopLocalStream();
+        alert('Собеседник отклонил звонок.');
+      }
+    });
+
+    newSocket.on('call_ended', () => {
+      ringtone.stop();
+      setIncomingCall(null);
+      if (currentCall) {
+        currentCall.close();
+        setCurrentCall(null);
+      }
+      stopLocalStream();
+    });
+
     return () => {
       newSocket.disconnect();
     };
@@ -245,7 +296,11 @@ export default function Chat() {
     setPeer(newPeer);
 
     newPeer.on('call', call => {
-      setIncomingCall({ call, from: call.peer });
+      setIncomingCall(prev => ({
+        call: call,
+        from: call.peer,
+        ...prev,
+      }));
       ringtone.startIncomingRingtone();
     });
 
@@ -313,9 +368,18 @@ export default function Chat() {
 
   // Calling functions
   const startCall = async (video: boolean) => {
-    if (!peer || !selectedUser) return;
+    if (!selectedUser) return;
     setIsVideoCall(video);
     ringtone.startOutgoingRingback();
+
+    if (socket) {
+      socket.emit('call_initiate', {
+        to: selectedUser.id,
+        isVideo: video,
+        callerName: currentUser.username,
+        callerAvatar: currentUser.avatar || localStorage.getItem('avatar'),
+      });
+    }
 
     let stream: MediaStream | null = null;
     try {
@@ -356,6 +420,13 @@ export default function Chat() {
     ringtone.stop();
     if (!incomingCall) return;
 
+    if (socket) {
+      socket.emit('call_response', {
+        to: parseInt(incomingCall.from),
+        accepted: true,
+      });
+    }
+
     let stream: MediaStream | null = null;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
@@ -393,13 +464,23 @@ export default function Chat() {
   const declineCall = () => {
     ringtone.stop();
     if (incomingCall) {
-      incomingCall.call.close();
+      if (socket) {
+        socket.emit('call_response', {
+          to: parseInt(incomingCall.from),
+          accepted: false,
+        });
+      }
+      if (incomingCall.call) incomingCall.call.close();
       setIncomingCall(null);
     }
   };
 
   const hangUp = () => {
     ringtone.stop();
+    const targetId = selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
+    if (targetId && socket) {
+      socket.emit('call_end', { to: targetId });
+    }
     if (currentCall) {
       currentCall.close();
       setCurrentCall(null);
