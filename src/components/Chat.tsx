@@ -93,6 +93,12 @@ export default function Chat() {
   const activeCallPartnerIdRef = useRef<number | null>(null);
   const answeringStreamRef = useRef<MediaStream | null>(null);
   const incomingCallTargetRef = useRef<number | null>(null);
+  const callStartTimeRef = useRef<number | null>(null);
+  const callAnsweredTimeRef = useRef<number | null>(null);
+  const callPartnerIdRef = useRef<number | null>(null);
+  const callInitiatorIdRef = useRef<number | null>(null);
+  const callTypeRef = useRef<'video' | 'audio'>('video');
+  const hasRecordedCallRef = useRef<boolean>(false);
   const [isVideoCall, setIsVideoCall] = useState<boolean>(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
@@ -157,8 +163,54 @@ export default function Chat() {
     scrollToBottom();
   }, [messages, groupMessages, channelMessages]);
 
-  const endCallCleanup = () => {
+  // Ensure remote audio stream plays automatically
+  useEffect(() => {
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.srcObject = remoteStream;
+      const playPromise = remoteAudioRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(err => console.warn('remoteAudioRef autoPlay error:', err));
+      }
+    }
+  }, [remoteStream]);
+
+  const recordCallMessage = (status: 'answered' | 'missed' | 'declined', durationSeconds?: number) => {
+    if (hasRecordedCallRef.current) return;
+    const partnerId = activeCallPartnerIdRef.current || callPartnerIdRef.current;
+    if (!partnerId || !socket) return;
+    hasRecordedCallRef.current = true;
+
+    const isVideo = callTypeRef.current === 'video';
+    const isCaller = callInitiatorIdRef.current === currentUser.id;
+
+    let dur = durationSeconds || 0;
+    if (dur <= 0 && callAnsweredTimeRef.current) {
+      dur = Math.max(1, Math.round((Date.now() - callAnsweredTimeRef.current) / 1000));
+    }
+
+    let text = '';
+    if (status === 'answered' || dur > 0) {
+      const m = Math.floor(dur / 60);
+      const s = dur % 60;
+      const durStr = m > 0 ? `${m} мин. ${s > 0 ? `${s} сек.` : ''}`.trim() : `${s} сек.`;
+      text = `📞 ${isVideo ? 'Видеозвонок' : 'Аудиозвонок'} (${durStr})`;
+    } else if (status === 'declined') {
+      text = `🚫 Отклонённый звонок`;
+    } else {
+      text = `❌ Пропущенный звонок`;
+    }
+
+    // Call initiator emits message so it's stored and broadcast to both parties
+    if (isCaller) {
+      socket.emit('private_message', { to: partnerId, text });
+    }
+  };
+
+  const endCallCleanup = (durationSeconds?: number) => {
     ringtone.stop();
+    if (callAnsweredTimeRef.current || (durationSeconds && durationSeconds > 0)) {
+      recordCallMessage('answered', durationSeconds);
+    }
     if (currentCallRef.current && typeof currentCallRef.current.close === 'function') {
       try {
         currentCallRef.current.close();
@@ -283,8 +335,16 @@ export default function Chat() {
     newSocket.on('incoming_call', ({ from, callerName, callerAvatar, isVideo }: any) => {
       console.log('📞 incoming_call socket event:', { from, callerName, isVideo });
       const fromStr = from.toString();
-      incomingCallTargetRef.current = parseInt(fromStr);
-      activeCallPartnerIdRef.current = parseInt(fromStr);
+      const fromId = parseInt(fromStr);
+      incomingCallTargetRef.current = fromId;
+      activeCallPartnerIdRef.current = fromId;
+      callStartTimeRef.current = Date.now();
+      callAnsweredTimeRef.current = null;
+      callPartnerIdRef.current = fromId;
+      callInitiatorIdRef.current = fromId;
+      callTypeRef.current = isVideo ? 'video' : 'audio';
+      hasRecordedCallRef.current = false;
+
       setIncomingCall(prev => ({
         ...prev,
         from: fromStr,
@@ -314,16 +374,23 @@ export default function Chat() {
     newSocket.on('call_response', ({ from, accepted }: any) => {
       console.log('📞 call_response socket event:', { from, accepted });
       if (!accepted) {
+        recordCallMessage('declined');
         endCallCleanup();
         alert('Собеседник отклонил звонок.');
       } else {
         // Partner accepted call
+        callAnsweredTimeRef.current = Date.now();
         ringtone.stop();
       }
     });
 
     newSocket.on('call_ended', () => {
       console.log('📞 call_ended socket event');
+      if (callAnsweredTimeRef.current) {
+        recordCallMessage('answered');
+      } else {
+        recordCallMessage('missed');
+      }
       endCallCleanup();
     });
 
@@ -470,14 +537,21 @@ export default function Chat() {
     if (!selectedUser) return;
     setIsVideoCall(video);
     activeCallPartnerIdRef.current = selectedUser.id;
+    callStartTimeRef.current = Date.now();
+    callAnsweredTimeRef.current = null;
+    callPartnerIdRef.current = selectedUser.id;
+    callInitiatorIdRef.current = currentUser.id;
+    callTypeRef.current = video ? 'video' : 'audio';
+    hasRecordedCallRef.current = false;
     ringtone.startOutgoingRingback();
 
     let stream: MediaStream | null = null;
+    const audioOptions = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: video });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: audioOptions, video: video });
     } catch {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        stream = await navigator.mediaDevices.getUserMedia({ audio: audioOptions, video: false });
         setIsVideoCall(false);
       } catch {
         ringtone.stop();
@@ -487,6 +561,7 @@ export default function Chat() {
     }
 
     if (stream) {
+      stream.getAudioTracks().forEach(t => (t.enabled = true));
       setLocalStream(stream);
       localStreamRef.current = stream;
       setAudioEnabled(true);
@@ -512,6 +587,7 @@ export default function Chat() {
 
           call.on('stream', (rs: MediaStream) => {
             console.log('✅ Remote stream received in caller');
+            callAnsweredTimeRef.current = Date.now();
             ringtone.stop();
             setRemoteStream(rs);
           });
@@ -535,11 +611,13 @@ export default function Chat() {
 
   const acceptCall = async () => {
     ringtone.stop();
+    callAnsweredTimeRef.current = Date.now();
     const callToAnswer = incomingCall?.call || pendingCallRef.current;
     const targetUserId = incomingCall?.from ? parseInt(incomingCall.from) : incomingCallTargetRef.current;
 
     if (targetUserId) {
       activeCallPartnerIdRef.current = targetUserId;
+      callPartnerIdRef.current = targetUserId;
     }
 
     // Send accept signal via Socket.IO
@@ -552,11 +630,12 @@ export default function Chat() {
 
     let stream: MediaStream | null = null;
     const wantVideo = isVideoCall;
+    const audioOptions = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: wantVideo });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: audioOptions, video: wantVideo });
     } catch {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        stream = await navigator.mediaDevices.getUserMedia({ audio: audioOptions, video: false });
         setIsVideoCall(false);
       } catch {
         alert('Не удалось получить доступ к микрофону.');
@@ -564,6 +643,7 @@ export default function Chat() {
     }
 
     if (stream) {
+      stream.getAudioTracks().forEach(t => (t.enabled = true));
       setLocalStream(stream);
       localStreamRef.current = stream;
       setAudioEnabled(true);
@@ -578,6 +658,7 @@ export default function Chat() {
 
         callToAnswer.on('stream', (rs: MediaStream) => {
           console.log('✅ Remote stream received in receiver');
+          callAnsweredTimeRef.current = Date.now();
           ringtone.stop();
           setRemoteStream(rs);
         });
@@ -604,6 +685,7 @@ export default function Chat() {
 
   const declineCall = () => {
     ringtone.stop();
+    recordCallMessage('declined');
     const targetId = incomingCall?.from ? parseInt(incomingCall.from) : incomingCallTargetRef.current;
     if (socket && targetId) {
       socket.emit('call_response', {
@@ -618,13 +700,19 @@ export default function Chat() {
     endCallCleanup();
   };
 
-  const hangUp = () => {
+  const hangUp = (durationSeconds?: number) => {
     ringtone.stop();
     const targetId = activeCallPartnerIdRef.current || selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
     if (targetId && socket) {
       socket.emit('call_end', { to: targetId });
     }
-    endCallCleanup();
+    const dur = durationSeconds || (callAnsweredTimeRef.current ? Math.round((Date.now() - callAnsweredTimeRef.current) / 1000) : 0);
+    if (callAnsweredTimeRef.current || dur > 0) {
+      recordCallMessage('answered', dur);
+    } else {
+      recordCallMessage('missed');
+    }
+    endCallCleanup(dur);
   };
 
   const stopLocalStream = () => {
@@ -838,7 +926,7 @@ export default function Chat() {
         <CallWindow
           localStream={localStream}
           remoteStream={remoteStream}
-          onHangUp={hangUp}
+          onHangUp={(dur) => hangUp(dur)}
           onToggleAudio={() => {
             const st = localStreamRef.current || localStream;
             if (st) {
@@ -1403,7 +1491,79 @@ export default function Chat() {
                           />
                         )}
                         {msg.audio && <audio controls src={msg.audio} style={{ width: '220px', marginBottom: 4 }} />}
-                        <div>{msg.text}</div>
+                        {msg.text.startsWith('📞') || msg.text.startsWith('❌') || msg.text.startsWith('🚫') ? (
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 12,
+                              padding: '4px 2px',
+                              cursor: selectedUser ? 'pointer' : 'default',
+                            }}
+                            onClick={() => {
+                              if (selectedUser && !currentCall) {
+                                startCall(msg.text.includes('Видеозвонок'));
+                              }
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: 38,
+                                height: 38,
+                                borderRadius: '50%',
+                                backgroundColor: msg.text.startsWith('📞')
+                                  ? 'rgba(34, 197, 94, 0.2)'
+                                  : msg.text.startsWith('❌')
+                                  ? 'rgba(239, 68, 68, 0.2)'
+                                  : 'rgba(249, 115, 22, 0.2)',
+                                color: msg.text.startsWith('📞')
+                                  ? '#22c55e'
+                                  : msg.text.startsWith('❌')
+                                  ? '#ef4444'
+                                  : '#f97316',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: 18,
+                                flexShrink: 0,
+                              }}
+                            >
+                              {msg.text.startsWith('📞') ? (msg.text.includes('Видеозвонок') ? '📹' : '📞') : msg.text.startsWith('❌') ? '↙️' : '🚫'}
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 600, fontSize: 14 }}>
+                                {msg.text.startsWith('📞')
+                                  ? (isOwn ? 'Исходящий звонок' : 'Входящий звонок')
+                                  : msg.text.startsWith('❌')
+                                  ? (isOwn ? 'Исходящий (без ответа)' : 'Пропущенный звонок')
+                                  : (isOwn ? 'Отклонён собеседником' : 'Отклонённый вызов')}
+                              </div>
+                              <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
+                                {msg.text.replace(/^[📞❌🚫]\s*/, '')}
+                              </div>
+                            </div>
+                            {selectedUser && (
+                              <div
+                                title="Перезвонить"
+                                style={{
+                                  width: 32,
+                                  height: 32,
+                                  borderRadius: '50%',
+                                  backgroundColor: 'rgba(0, 132, 255, 0.15)',
+                                  color: '#0084ff',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: 14,
+                                }}
+                              >
+                                📞
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div>{msg.text}</div>
+                        )}
                         <div
                           style={{
                             fontSize: 11,

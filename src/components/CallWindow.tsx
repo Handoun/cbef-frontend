@@ -5,7 +5,7 @@ import Avatar from './Avatar';
 interface CallWindowProps {
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
-  onHangUp: () => void;
+  onHangUp: (durationSeconds?: number) => void;
   onToggleAudio: () => void;
   onToggleVideo: () => void;
   onShareScreen: () => void;
@@ -36,6 +36,7 @@ export default function CallWindow({
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const screenVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const [seconds, setSeconds] = useState(0);
 
   useEffect(() => {
@@ -58,10 +59,24 @@ export default function CallWindow({
   }, [localStream]);
 
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream;
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.srcObject = remoteStream;
+      const p = remoteAudioRef.current.play();
+      if (p !== undefined) {
+        p.catch(err => console.warn('remoteAudioRef autoPlay blocked:', err));
+      }
     }
   }, [remoteStream]);
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+      const p = remoteVideoRef.current.play();
+      if (p !== undefined) {
+        p.catch(err => console.warn('remoteVideoRef autoPlay blocked:', err));
+      }
+    }
+  }, [remoteStream, isVideoCall, hasRemoteVideo]);
 
   useEffect(() => {
     if (screenVideoRef.current && screenStream) {
@@ -261,7 +276,7 @@ export default function CallWindow({
         </button>
 
         <button
-          onClick={onHangUp}
+          onClick={() => onHangUp(seconds)}
           title="Завершить звонок"
           style={{
             ...actionBtnStyle,
@@ -274,6 +289,8 @@ export default function CallWindow({
           📞
         </button>
       </div>
+      {/* Всегда активный скрытый аудио элемент для проигрывания звука собеседника */}
+      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
     </motion.div>
   );
 }
