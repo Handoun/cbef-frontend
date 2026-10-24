@@ -62,7 +62,14 @@ export default function CallWindow({
     }
   }, [localStream]);
 
+  // Audio playback for both video and audio calls
   useEffect(() => {
+    if (remoteStream) {
+      remoteStream.getAudioTracks().forEach(t => {
+        t.enabled = true;
+      });
+    }
+
     if (remoteAudioRef.current && remoteStream) {
       remoteAudioRef.current.srcObject = remoteStream;
       remoteAudioRef.current.muted = false;
@@ -77,7 +84,19 @@ export default function CallWindow({
   // Touch / click unlock to guarantee audio playback under browser autoplay policies
   useEffect(() => {
     const unlock = () => {
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          if (ctx.state === 'suspended') {
+            ctx.resume();
+          }
+        }
+      } catch {}
+
       if (remoteAudioRef.current) {
+        remoteAudioRef.current.muted = false;
+        remoteAudioRef.current.volume = 1.0;
         remoteAudioRef.current.play().catch(() => {});
       }
       if (remoteVideoRef.current) {
@@ -172,6 +191,7 @@ export default function CallWindow({
             ref={screenVideoRef}
             autoPlay
             playsInline
+            muted
             style={{ width: '100%', height: '100%', objectFit: 'contain' }}
           />
         ) : isVideoCall && hasRemoteVideo ? (
@@ -179,6 +199,7 @@ export default function CallWindow({
             ref={remoteVideoRef}
             autoPlay
             playsInline
+            muted
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           />
         ) : (
@@ -311,17 +332,18 @@ export default function CallWindow({
           📞
         </button>
       </div>
-      {/* Всегда активный аудио элемент для чистого проигрывания звука собеседника */}
+
+      {/* Выделенный аудио элемент для чистого проигрывания звука собеседника */}
       <audio
         ref={remoteAudioRef}
         autoPlay
         playsInline
         style={{
-          position: 'fixed',
-          top: -9999,
-          left: -9999,
-          width: 1,
-          height: 1,
+          position: 'absolute',
+          bottom: 10,
+          left: 10,
+          width: 2,
+          height: 2,
           opacity: 0.01,
           pointerEvents: 'none',
         }}

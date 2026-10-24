@@ -26,14 +26,20 @@ const ICE_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:87.120.165.116:3478' },
     {
-      urls: 'turn:87.120.165.116:3478',
+      urls: [
+        'turn:87.120.165.116:3478?transport=udp',
+        'turn:87.120.165.116:3478?transport=tcp',
+      ],
       username: 'cbefuser',
       credential: 'cbefpass2025',
     },
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
   ],
+  iceCandidatePoolSize: 10,
 };
 
 interface User {
@@ -62,6 +68,18 @@ interface Message {
 }
 
 export default function Chat() {
+  const unlockAudioContext = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        if (ctx.state === 'suspended') {
+          ctx.resume();
+        }
+      }
+    } catch {}
+  };
+
   const navigate = useNavigate();
   const [users, setUsers] = useState<User[]>([]);
   const [contacts, setContacts] = useState<User[]>([]);
@@ -98,6 +116,9 @@ export default function Chat() {
   const currentCallRef = useRef<any>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
+  const localOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
+  const callAcceptedRef = useRef<boolean>(false);
+  const remoteMediaStreamRef = useRef<MediaStream | null>(null);
   const queuedIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -174,16 +195,7 @@ export default function Chat() {
     scrollToBottom();
   }, [messages, groupMessages, channelMessages]);
 
-  // Ensure remote audio stream plays automatically
-  useEffect(() => {
-    if (remoteAudioRef.current && remoteStream) {
-      remoteAudioRef.current.srcObject = remoteStream;
-      const playPromise = remoteAudioRef.current.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(err => console.warn('remoteAudioRef autoPlay error:', err));
-      }
-    }
-  }, [remoteStream]);
+  
 
   const recordCallMessage = (status: 'answered' | 'missed' | 'declined', durationSeconds?: number) => {
     if (hasRecordedCallRef.current) return;
@@ -232,7 +244,9 @@ export default function Chat() {
     }
     currentCallRef.current = null;
     pendingOfferRef.current = null;
+    localOfferRef.current = null;
     queuedIceCandidatesRef.current = [];
+    callAcceptedRef.current = false;
     activeCallPartnerIdRef.current = null;
     incomingCallTargetRef.current = null;
 
@@ -252,6 +266,12 @@ export default function Chat() {
     }
     setScreenStream(null);
 
+    if (remoteMediaStreamRef.current) {
+      try {
+        remoteMediaStreamRef.current.getTracks().forEach(t => t.stop());
+      } catch {}
+      remoteMediaStreamRef.current = null;
+    }
     setRemoteStream(null);
     setCurrentCall(null);
     setIncomingCall(null);
@@ -390,9 +410,13 @@ export default function Chat() {
     newSocket.on('webrtc_signal', async ({ from, signal }: any) => {
       console.log('📡 webrtc_signal received:', signal?.type, 'from:', from);
       const pc = peerConnectionRef.current;
+      const fromId = parseInt(from.toString());
 
       if (signal?.type === 'offer') {
         pendingOfferRef.current = signal.offer;
+        if (callAcceptedRef.current && pc) {
+          await handleRemoteOfferAndAnswer(pc, fromId, signal.offer);
+        }
       } else if (signal?.type === 'answer') {
         ringtone.stop();
         callAnsweredTimeRef.current = Date.now();
@@ -401,7 +425,11 @@ export default function Chat() {
             await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
             while (queuedIceCandidatesRef.current.length > 0) {
               const cand = queuedIceCandidatesRef.current.shift()!;
-              await pc.addIceCandidate(new RTCIceCandidate(cand));
+              try {
+                await pc.addIceCandidate(new RTCIceCandidate(cand));
+              } catch (e) {
+                console.warn('Error adding queued ICE candidate:', e);
+              }
             }
           } catch (e) {
             console.error('Error setting remote answer:', e);
@@ -420,7 +448,7 @@ export default function Chat() {
       }
     });
 
-    newSocket.on('call_response', ({ from, accepted }: any) => {
+    newSocket.on('call_response', async ({ from, accepted }: any) => {
       console.log('📞 call_response socket event:', { from, accepted });
       if (!accepted) {
         recordCallMessage('declined');
@@ -430,6 +458,14 @@ export default function Chat() {
         // Partner accepted call
         callAnsweredTimeRef.current = Date.now();
         ringtone.stop();
+        setCurrentCall({ id: 'active', partnerId: from });
+        // Guarantee partner has our offer
+        if (localOfferRef.current && newSocket) {
+          newSocket.emit('webrtc_signal', {
+            to: from,
+            signal: { type: 'offer', offer: localOfferRef.current },
+          });
+        }
       }
     });
 
@@ -507,11 +543,38 @@ export default function Chat() {
   };
 
   // Native WebRTC Calling Implementation
+  const handleRemoteOfferAndAnswer = async (pc: RTCPeerConnection, partnerId: number, offer: any) => {
+    try {
+      if (pc.signalingState !== 'stable' && pc.signalingState !== 'have-local-offer') {
+        // Not in valid state for offer
+      }
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      while (queuedIceCandidatesRef.current.length > 0) {
+        const cand = queuedIceCandidatesRef.current.shift()!;
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(cand));
+        } catch (e) {
+          console.warn('Error adding candidate:', e);
+        }
+      }
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      if (socket) {
+        socket.emit('webrtc_signal', {
+          to: partnerId,
+          signal: { type: 'answer', answer: { type: answer.type, sdp: answer.sdp } },
+        });
+      }
+    } catch (err) {
+      console.error('Failed to handle offer and answer:', err);
+    }
+  };
+
   const createPeerConnection = (partnerId: number): RTCPeerConnection => {
     if (peerConnectionRef.current) {
       try { peerConnectionRef.current.close(); } catch {}
     }
-    queuedIceCandidatesRef.current = [];
 
     const pc = new RTCPeerConnection(ICE_CONFIG);
     peerConnectionRef.current = pc;
@@ -526,12 +589,32 @@ export default function Chat() {
     };
 
     pc.ontrack = (event) => {
-      console.log('✅ Remote WebRTC track arrived:', event.track.kind);
+      console.log('✅ Remote WebRTC track arrived:', event.track.kind, event.track.id);
       event.track.enabled = true;
-      const stream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
-      stream.getAudioTracks().forEach(t => (t.enabled = true));
-      stream.getVideoTracks().forEach(t => (t.enabled = true));
-      setRemoteStream(stream);
+
+      let st = remoteMediaStreamRef.current;
+      if (!st) {
+        st = new MediaStream();
+        remoteMediaStreamRef.current = st;
+      }
+
+      if (event.streams && event.streams[0]) {
+        event.streams[0].getTracks().forEach(t => {
+          t.enabled = true;
+          if (!st!.getTracks().some(existing => existing.id === t.id)) {
+            st!.addTrack(t);
+          }
+        });
+      } else {
+        if (!st.getTracks().some(existing => existing.id === event.track.id)) {
+          st.addTrack(event.track);
+        }
+      }
+
+      st.getAudioTracks().forEach(t => { t.enabled = true; });
+      st.getVideoTracks().forEach(t => { t.enabled = true; });
+
+      setRemoteStream(new MediaStream(st.getTracks()));
       callAnsweredTimeRef.current = Date.now();
       ringtone.stop();
     };
@@ -548,6 +631,7 @@ export default function Chat() {
 
   const startCall = async (video: boolean) => {
     if (!selectedUser || !socket) return;
+    unlockAudioContext();
     setIsVideoCall(video);
     activeCallPartnerIdRef.current = selectedUser.id;
     callStartTimeRef.current = Date.now();
@@ -556,13 +640,16 @@ export default function Chat() {
     callInitiatorIdRef.current = currentUser.id;
     callTypeRef.current = video ? 'video' : 'audio';
     hasRecordedCallRef.current = false;
+    queuedIceCandidatesRef.current = [];
     setCallPartnerInfo({ name: selectedUser.username, avatar: selectedUser.avatar });
     ringtone.startOutgoingRingback();
+
+    setCurrentCall({ id: 'outgoing', partnerId: selectedUser.id });
 
     let stream: MediaStream | null = null;
     const audioOptions = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: audioOptions, video: video });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: audioOptions, video: video ? { facingMode: 'user' } : false });
     } catch {
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: audioOptions, video: false });
@@ -570,6 +657,7 @@ export default function Chat() {
       } catch {
         ringtone.stop();
         alert('Не удалось получить доступ к микрофону/камере.');
+        endCallCleanup();
         return;
       }
     }
@@ -591,8 +679,12 @@ export default function Chat() {
     }
 
     try {
-      const offer = await pc.createOffer();
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: video,
+      });
       await pc.setLocalDescription(offer);
+      localOfferRef.current = { type: offer.type, sdp: offer.sdp };
 
       socket.emit('call_initiate', {
         to: selectedUser.id,
@@ -602,7 +694,10 @@ export default function Chat() {
         offer: { type: offer.type, sdp: offer.sdp },
       });
 
-      setCurrentCall({ id: 'outgoing', partnerId: selectedUser.id });
+      socket.emit('webrtc_signal', {
+        to: selectedUser.id,
+        signal: { type: 'offer', offer: { type: offer.type, sdp: offer.sdp } },
+      });
     } catch (err) {
       console.error('Failed to create offer:', err);
       endCallCleanup();
@@ -611,6 +706,7 @@ export default function Chat() {
   };
 
   const acceptCall = async () => {
+    unlockAudioContext();
     ringtone.stop();
     callAnsweredTimeRef.current = Date.now();
     const partnerId = incomingCall?.from ? parseInt(incomingCall.from) : activeCallPartnerIdRef.current;
@@ -621,18 +717,23 @@ export default function Chat() {
 
     activeCallPartnerIdRef.current = partnerId;
     callPartnerIdRef.current = partnerId;
+    callAcceptedRef.current = true;
+
+    // Immediately open CallWindow and dismiss incoming call dialog
+    setCurrentCall({ id: 'active', partnerId });
+    setIncomingCall(null);
 
     let stream: MediaStream | null = null;
     const wantVideo = isVideoCall;
     const audioOptions = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: audioOptions, video: wantVideo });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: audioOptions, video: wantVideo ? { facingMode: 'user' } : false });
     } catch {
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: audioOptions, video: false });
         setIsVideoCall(false);
       } catch {
-        alert('Не удалось получить доступ к микрофону.');
+        console.warn('Microphone permission not granted or device missing');
       }
     }
 
@@ -652,35 +753,15 @@ export default function Chat() {
       });
     }
 
-    try {
-      const offer = pendingOfferRef.current;
-      if (offer) {
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        while (queuedIceCandidatesRef.current.length > 0) {
-          const cand = queuedIceCandidatesRef.current.shift()!;
-          await pc.addIceCandidate(new RTCIceCandidate(cand));
-        }
-      }
+    socket.emit('call_response', {
+      to: partnerId,
+      accepted: true,
+    });
 
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      socket.emit('webrtc_signal', {
-        to: partnerId,
-        signal: { type: 'answer', answer: { type: answer.type, sdp: answer.sdp } },
-      });
-
-      socket.emit('call_response', {
-        to: partnerId,
-        accepted: true,
-      });
-
-      setCurrentCall({ id: 'active', partnerId });
-    } catch (err) {
-      console.error('Failed to answer call:', err);
+    const offer = pendingOfferRef.current || incomingCall?.offer;
+    if (offer) {
+      await handleRemoteOfferAndAnswer(pc, partnerId, offer);
     }
-
-    setIncomingCall(null);
   };
 
   const declineCall = () => {
@@ -1795,7 +1876,7 @@ export default function Chat() {
         )}
       </div>
 
-      <audio ref={remoteAudioRef} autoPlay />
+      
 
       {/* Модалки */}
       {selectedImage && <ImageLightbox src={selectedImage} onClose={() => setSelectedImage(null)} />}
