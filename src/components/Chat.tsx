@@ -76,7 +76,23 @@ export default function Chat() {
   const [currentCall, setCurrentCall] = useState<any>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  const [incomingCall, setIncomingCall] = useState<{ call: any; from: string } | null>(null);
+  interface IncomingCallState {
+  call: any | null;
+  from: string;
+  callerName?: string;
+  callerAvatar?: string;
+  isVideo?: boolean;
+}
+
+  const [incomingCall, setIncomingCall] = useState<IncomingCallState | null>(null);
+  const currentCallRef = useRef<any>(null);
+  const pendingCallRef = useRef<any>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  const peerRef = useRef<Peer | null>(null);
+  const activeCallPartnerIdRef = useRef<number | null>(null);
+  const answeringStreamRef = useRef<MediaStream | null>(null);
+  const incomingCallTargetRef = useRef<number | null>(null);
   const [isVideoCall, setIsVideoCall] = useState<boolean>(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
@@ -140,6 +156,42 @@ export default function Chat() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, groupMessages, channelMessages]);
+
+  const endCallCleanup = () => {
+    ringtone.stop();
+    if (currentCallRef.current && typeof currentCallRef.current.close === 'function') {
+      try {
+        currentCallRef.current.close();
+      } catch (e) {
+        console.warn('Error closing currentCall', e);
+      }
+    }
+    currentCallRef.current = null;
+    pendingCallRef.current = null;
+    answeringStreamRef.current = null;
+    activeCallPartnerIdRef.current = null;
+    incomingCallTargetRef.current = null;
+
+    if (localStreamRef.current) {
+      try {
+        localStreamRef.current.getTracks().forEach(t => t.stop());
+      } catch {}
+      localStreamRef.current = null;
+    }
+    setLocalStream(null);
+
+    if (screenStreamRef.current) {
+      try {
+        screenStreamRef.current.getTracks().forEach(t => t.stop());
+      } catch {}
+      screenStreamRef.current = null;
+    }
+    setScreenStream(null);
+
+    setRemoteStream(null);
+    setCurrentCall(null);
+    setIncomingCall(null);
+  };
 
   // Reset messages when switching chat
   useEffect(() => {
@@ -229,28 +281,30 @@ export default function Chat() {
     });
 
     newSocket.on('incoming_call', ({ from, callerName, callerAvatar, isVideo }: any) => {
+      console.log('📞 incoming_call socket event:', { from, callerName, isVideo });
+      const fromStr = from.toString();
+      incomingCallTargetRef.current = parseInt(fromStr);
+      activeCallPartnerIdRef.current = parseInt(fromStr);
       setIncomingCall(prev => ({
-        call: prev?.call || null,
-        from: from.toString(),
+        ...prev,
+        from: fromStr,
+        callerName: callerName || 'Пользователь',
+        callerAvatar: callerAvatar || undefined,
+        isVideo: isVideo !== false,
+        call: prev?.call || pendingCallRef.current || null,
       }));
       setIsVideoCall(isVideo !== false);
       ringtone.startIncomingRingtone();
 
       if (typeof Notification !== 'undefined') {
+        const title = '📞 Входящий ' + (isVideo ? 'видеозвонок' : 'аудиозвонок');
+        const body = (callerName || 'Пользователь') + ' звонит вам в CBEF';
         if (Notification.permission === 'granted') {
-          new Notification('📞 Входящий ' + (isVideo ? 'видеозвонок' : 'аудиозвонок'), {
-            body: (callerName || 'Пользователь') + ' звонит вам в CBEF',
-            icon: callerAvatar || undefined,
-            tag: 'cbef_call',
-          });
+          new Notification(title, { body, icon: callerAvatar || undefined, tag: 'cbef_call' });
         } else if (Notification.permission === 'default') {
           Notification.requestPermission().then(perm => {
             if (perm === 'granted') {
-              new Notification('📞 Входящий ' + (isVideo ? 'видеозвонок' : 'аудиозвонок'), {
-                body: (callerName || 'Пользователь') + ' звонит вам в CBEF',
-                icon: callerAvatar || undefined,
-                tag: 'cbef_call',
-              });
+              new Notification(title, { body, icon: callerAvatar || undefined, tag: 'cbef_call' });
             }
           });
         }
@@ -258,25 +312,19 @@ export default function Chat() {
     });
 
     newSocket.on('call_response', ({ from, accepted }: any) => {
+      console.log('📞 call_response socket event:', { from, accepted });
       if (!accepted) {
-        ringtone.stop();
-        if (currentCall) {
-          currentCall.close();
-          setCurrentCall(null);
-        }
-        stopLocalStream();
+        endCallCleanup();
         alert('Собеседник отклонил звонок.');
+      } else {
+        // Partner accepted call
+        ringtone.stop();
       }
     });
 
     newSocket.on('call_ended', () => {
-      ringtone.stop();
-      setIncomingCall(null);
-      if (currentCall) {
-        currentCall.close();
-        setCurrentCall(null);
-      }
-      stopLocalStream();
+      console.log('📞 call_ended socket event');
+      endCallCleanup();
     });
 
     return () => {
@@ -284,29 +332,80 @@ export default function Chat() {
     };
   }, [token, currentUser.id, selectedUser, selectedGroup, selectedChannel, navigate]);
 
-  // PeerJS calls setup
+  // PeerJS calls setup with STUN servers and race-condition prevention
   useEffect(() => {
     if (!currentUser.id) return;
     const newPeer = new Peer(currentUser.id.toString(), {
-      host: PEER_HOST,
-      port: parseInt(PEER_PORT),
-      path: PEER_PATH,
-      secure: true,
+      host: PEER_HOST || window.location.hostname,
+      port: parseInt(PEER_PORT || (window.location.protocol === 'https:' ? '443' : '80')),
+      path: PEER_PATH || '/peerjs/myapp',
+      secure: window.location.protocol === 'https:',
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' },
+        ],
+      },
     });
     setPeer(newPeer);
+    peerRef.current = newPeer;
+
+    newPeer.on('open', (id) => {
+      console.log('✅ PeerJS registered with ID:', id);
+    });
 
     newPeer.on('call', call => {
+      console.log('📞 PeerJS call received from:', call.peer);
+      pendingCallRef.current = call;
+      incomingCallTargetRef.current = parseInt(call.peer);
+      activeCallPartnerIdRef.current = parseInt(call.peer);
+
+      // If user already clicked "Accept" before peer call arrived:
+      if (answeringStreamRef.current) {
+        const stream = answeringStreamRef.current;
+        answeringStreamRef.current = null;
+        call.answer(stream);
+        setCurrentCall(call);
+        currentCallRef.current = call;
+
+        call.on('stream', (rs: MediaStream) => {
+          console.log('✅ Remote stream received in late-arrival answer');
+          ringtone.stop();
+          setRemoteStream(rs);
+        });
+        call.on('close', () => endCallCleanup());
+        call.on('error', (err: any) => {
+          console.error('Peer call error:', err);
+          endCallCleanup();
+        });
+        return;
+      }
+
       setIncomingCall(prev => ({
+        ...prev,
         call: call,
         from: call.peer,
-        ...prev,
       }));
       ringtone.startIncomingRingtone();
+
+      call.on('close', () => endCallCleanup());
+      call.on('error', (err: any) => {
+        console.error('Incoming peer call error:', err);
+        endCallCleanup();
+      });
+    });
+
+    newPeer.on('error', err => {
+      console.error('❌ PeerJS error:', err);
     });
 
     return () => {
       ringtone.stop();
       newPeer.destroy();
+      peerRef.current = null;
     };
   }, [currentUser.id]);
 
@@ -370,16 +469,8 @@ export default function Chat() {
   const startCall = async (video: boolean) => {
     if (!selectedUser) return;
     setIsVideoCall(video);
+    activeCallPartnerIdRef.current = selectedUser.id;
     ringtone.startOutgoingRingback();
-
-    if (socket) {
-      socket.emit('call_initiate', {
-        to: selectedUser.id,
-        isVideo: video,
-        callerName: currentUser.username,
-        callerAvatar: currentUser.avatar || localStorage.getItem('avatar'),
-      });
-    }
 
     let stream: MediaStream | null = null;
     try {
@@ -397,43 +488,75 @@ export default function Chat() {
 
     if (stream) {
       setLocalStream(stream);
+      localStreamRef.current = stream;
       setAudioEnabled(true);
-      setVideoEnabled(video);
+      setVideoEnabled(video && stream.getVideoTracks().length > 0);
     }
 
-    const call = peer.call(selectedUser.id.toString(), stream || undefined);
-    if (call) {
-      setCurrentCall(call);
-      call.on('stream', (rs: MediaStream) => {
-        ringtone.stop();
-        setRemoteStream(rs);
+    if (socket) {
+      socket.emit('call_initiate', {
+        to: selectedUser.id,
+        isVideo: video,
+        callerName: currentUser.username,
+        callerAvatar: currentUser.avatar || localStorage.getItem('avatar'),
       });
-      call.on('close', () => {
-        ringtone.stop();
-        setCurrentCall(null);
-        stopLocalStream();
-      });
+    }
+
+    const peerInstance = peerRef.current || peer;
+    if (peerInstance) {
+      try {
+        const call = peerInstance.call(selectedUser.id.toString(), stream || undefined);
+        if (call) {
+          setCurrentCall(call);
+          currentCallRef.current = call;
+
+          call.on('stream', (rs: MediaStream) => {
+            console.log('✅ Remote stream received in caller');
+            ringtone.stop();
+            setRemoteStream(rs);
+          });
+          call.on('close', () => {
+            endCallCleanup();
+          });
+          call.on('error', (err: any) => {
+            console.error('Call error in caller:', err);
+            endCallCleanup();
+          });
+        }
+      } catch (err) {
+        console.error('peer.call failed:', err);
+        endCallCleanup();
+        alert('Не удалось установить соединение для звонка.');
+      }
+    } else {
+      console.warn('Peer service not connected yet');
     }
   };
 
   const acceptCall = async () => {
     ringtone.stop();
-    if (!incomingCall) return;
+    const callToAnswer = incomingCall?.call || pendingCallRef.current;
+    const targetUserId = incomingCall?.from ? parseInt(incomingCall.from) : incomingCallTargetRef.current;
 
-    if (socket) {
+    if (targetUserId) {
+      activeCallPartnerIdRef.current = targetUserId;
+    }
+
+    // Send accept signal via Socket.IO
+    if (socket && targetUserId) {
       socket.emit('call_response', {
-        to: parseInt(incomingCall.from),
+        to: targetUserId,
         accepted: true,
       });
     }
 
     let stream: MediaStream | null = null;
+    const wantVideo = isVideoCall;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-      setIsVideoCall(true);
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: wantVideo });
     } catch {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         setIsVideoCall(false);
       } catch {
         alert('Не удалось получить доступ к микрофону.');
@@ -442,73 +565,87 @@ export default function Chat() {
 
     if (stream) {
       setLocalStream(stream);
+      localStreamRef.current = stream;
       setAudioEnabled(true);
-      setVideoEnabled(true);
+      setVideoEnabled(wantVideo && stream.getVideoTracks().length > 0);
     }
 
-    incomingCall.call.answer(stream || undefined);
-    setCurrentCall(incomingCall.call);
+    if (callToAnswer) {
+      try {
+        callToAnswer.answer(stream || undefined);
+        setCurrentCall(callToAnswer);
+        currentCallRef.current = callToAnswer;
 
-    incomingCall.call.on('stream', (rs: MediaStream) => {
-      setRemoteStream(rs);
-    });
+        callToAnswer.on('stream', (rs: MediaStream) => {
+          console.log('✅ Remote stream received in receiver');
+          ringtone.stop();
+          setRemoteStream(rs);
+        });
 
-    incomingCall.call.on('close', () => {
-      setCurrentCall(null);
-      stopLocalStream();
-    });
+        callToAnswer.on('close', () => {
+          endCallCleanup();
+        });
+
+        callToAnswer.on('error', (err: any) => {
+          console.error('Call error in receiver:', err);
+          endCallCleanup();
+        });
+      } catch (err) {
+        console.error('Failed to answer call:', err);
+      }
+    } else {
+      console.warn('Call object not yet ready when accepting, waiting for peer call event...');
+      answeringStreamRef.current = stream;
+      setCurrentCall({ id: 'incoming-connecting' });
+    }
 
     setIncomingCall(null);
   };
 
   const declineCall = () => {
     ringtone.stop();
-    if (incomingCall) {
-      if (socket) {
-        socket.emit('call_response', {
-          to: parseInt(incomingCall.from),
-          accepted: false,
-        });
-      }
-      if (incomingCall.call) incomingCall.call.close();
-      setIncomingCall(null);
+    const targetId = incomingCall?.from ? parseInt(incomingCall.from) : incomingCallTargetRef.current;
+    if (socket && targetId) {
+      socket.emit('call_response', {
+        to: targetId,
+        accepted: false,
+      });
     }
+    const callToClose = incomingCall?.call || pendingCallRef.current;
+    if (callToClose && typeof callToClose.close === 'function') {
+      try { callToClose.close(); } catch {}
+    }
+    endCallCleanup();
   };
 
   const hangUp = () => {
     ringtone.stop();
-    const targetId = selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
+    const targetId = activeCallPartnerIdRef.current || selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
     if (targetId && socket) {
       socket.emit('call_end', { to: targetId });
     }
-    if (currentCall) {
-      currentCall.close();
-      setCurrentCall(null);
-    }
-    stopLocalStream();
+    endCallCleanup();
   };
 
   const stopLocalStream = () => {
-    if (localStream) {
-      localStream.getTracks().forEach(t => t.stop());
-      setLocalStream(null);
-    }
-    if (screenStream) {
-      screenStream.getTracks().forEach(t => t.stop());
-      setScreenStream(null);
-    }
-    setRemoteStream(null);
+    endCallCleanup();
   };
 
   const onShareScreen = async () => {
     try {
-      if (screenStream) {
-        screenStream.getTracks().forEach(t => t.stop());
+      if (screenStreamRef.current || screenStream) {
+        const st = screenStreamRef.current || screenStream;
+        st?.getTracks().forEach(t => t.stop());
+        screenStreamRef.current = null;
         setScreenStream(null);
       } else {
         const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        screenStreamRef.current = stream;
         setScreenStream(stream);
-        stream.getVideoTracks()[0].onended = () => setScreenStream(null);
+        stream.getVideoTracks()[0].onended = () => {
+          screenStreamRef.current = null;
+          setScreenStream(null);
+        };
       }
     } catch (err) {
       console.warn('Screen share canceled or failed', err);
@@ -703,14 +840,16 @@ export default function Chat() {
           remoteStream={remoteStream}
           onHangUp={hangUp}
           onToggleAudio={() => {
-            if (localStream) {
-              localStream.getAudioTracks().forEach(t => (t.enabled = !t.enabled));
+            const st = localStreamRef.current || localStream;
+            if (st) {
+              st.getAudioTracks().forEach(t => (t.enabled = !t.enabled));
               setAudioEnabled(prev => !prev);
             }
           }}
           onToggleVideo={() => {
-            if (localStream) {
-              localStream.getVideoTracks().forEach(t => (t.enabled = !t.enabled));
+            const st = localStreamRef.current || localStream;
+            if (st) {
+              st.getVideoTracks().forEach(t => (t.enabled = !t.enabled));
               setVideoEnabled(prev => !prev);
             }
           }}
@@ -719,8 +858,18 @@ export default function Chat() {
           videoEnabled={videoEnabled}
           screenStream={screenStream}
           localAvatar={currentUser.avatar || localStorage.getItem('avatar')}
-          remoteAvatar={selectedUser?.avatar || undefined}
-          remoteName={selectedUser?.username || 'Собеседник'}
+          remoteAvatar={
+            selectedUser?.avatar ||
+            users.find(u => u.id === activeCallPartnerIdRef.current)?.avatar ||
+            (incomingCall as any)?.callerAvatar ||
+            undefined
+          }
+          remoteName={
+            selectedUser?.username ||
+            users.find(u => u.id === activeCallPartnerIdRef.current)?.username ||
+            (incomingCall as any)?.callerName ||
+            'Собеседник'
+          }
           isVideoCall={isVideoCall}
         />
       )}
