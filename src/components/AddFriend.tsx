@@ -7,9 +7,10 @@ const API_URL = import.meta.env.VITE_API_URL;
 interface AddFriendProps {
   token: string;
   onClose: () => void;
+  onAdded?: (user: any) => void;
 }
 
-export default function AddFriend({ token, onClose }: AddFriendProps) {
+export default function AddFriend({ token, onClose, onAdded }: AddFriendProps) {
   const [username, setUsername] = useState('');
   const [message, setMessage] = useState('');
 

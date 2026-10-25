@@ -93,20 +93,7 @@ export default function Chat() {
 
   const [messages, setMessages] = useState<Message[]>([]);
 
-  useEffect(() => {
-    currentCallRef.current = currentCall;
-  }, [currentCall]);
 
-  useEffect(() => {
-    if (remoteAudioRef.current && remoteStream) {
-      if (remoteAudioRef.current.srcObject !== remoteStream) {
-        remoteAudioRef.current.srcObject = remoteStream;
-      }
-      remoteAudioRef.current.muted = false;
-      remoteAudioRef.current.volume = 1.0;
-      remoteAudioRef.current.play().catch(() => {});
-    }
-  }, [remoteStream]);
   const [groupMessages, setGroupMessages] = useState<any[]>([]);
   const [channelMessages, setChannelMessages] = useState<any[]>([]);
   const [input, setInput] = useState('');
@@ -214,6 +201,39 @@ export default function Chat() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, groupMessages, channelMessages]);
+
+  useEffect(() => {
+    currentCallRef.current = currentCall;
+  }, [currentCall]);
+
+  useEffect(() => {
+    if (remoteAudioRef.current && remoteStream) {
+      if (remoteAudioRef.current.srcObject !== remoteStream) {
+        remoteAudioRef.current.srcObject = remoteStream;
+      }
+      remoteAudioRef.current.muted = false;
+      remoteAudioRef.current.volume = 1.0;
+      remoteAudioRef.current.play().catch(() => {});
+    }
+  }, [remoteStream]);
+
+  const handleAddFriendOrContact = async (userToContact: User) => {
+    try {
+      await axios.post(`${API_URL}/api/contacts`, { contactId: userToContact.id }, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      try {
+        await axios.post(`${API_URL}/api/friend-requests`, { toId: userToContact.id }, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch {}
+      setRefreshContacts(p => p + 1);
+      alert(`${userToContact.username} добавлен(а) в список контактов!`);
+    } catch (e) {
+      console.error('Failed to add contact', e);
+      alert('Ошибка при добавлении в контакты.');
+    }
+  };
 
   
 
@@ -339,6 +359,7 @@ export default function Chat() {
         setUnreadCounts(prev => ({ ...prev, [msg.sender_id]: (prev[msg.sender_id] || 0) + 1 }));
         setLastMessageTimes(prev => ({ ...prev, [msg.sender_id]: msg.created_at }));
       }
+      setRefreshContacts(p => p + 1);
     });
 
     newSocket.on('group_message', (msg: Message) => {
@@ -573,6 +594,11 @@ export default function Chat() {
     if (!text && !extra) return;
     if (selectedUser) {
       socket.emit('private_message', { to: selectedUser.id, text, ttl, ...extra });
+      if (!contacts.some(c => c.id === selectedUser.id)) {
+        axios.post(`${API_URL}/api/contacts`, { contactId: selectedUser.id }, {
+          headers: { Authorization: `Bearer ${token}` }
+        }).then(() => setRefreshContacts(p => p + 1)).catch(() => {});
+      }
     } else if (selectedGroup) {
       socket.emit('group_message', { groupId: selectedGroup.id, text, ...extra });
     } else if (selectedChannel) {
@@ -1125,9 +1151,11 @@ export default function Chat() {
   const filteredGroups = groups.filter(g => g.name.toLowerCase().includes(searchQuery.toLowerCase()));
   const filteredChannels = channels.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
-  const filteredOtherUsers = users
-    .filter(u => u.id !== currentUser.id && !contacts.some(c => c.id === u.id))
-    .filter(u => u.username.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredOtherUsers = searchQuery.trim().length > 0
+    ? users
+        .filter(u => u.id !== currentUser.id && !contacts.some(c => c.id === u.id))
+        .filter(u => u.username.toLowerCase().includes(searchQuery.toLowerCase()))
+    : [];
 
   const hasChatSelected = !!(selectedUser || selectedGroup || selectedChannel);
 
@@ -1385,11 +1413,20 @@ export default function Chat() {
               );
             })}
 
-          {/* Другие пользователи платформы */}
+          {/* Пустой список контактов */}
+          {(activeTab === 'all' || activeTab === 'direct') && contacts.length === 0 && !searchQuery.trim() && (
+            <div style={{ padding: '36px 20px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 13, lineHeight: '1.6' }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>💬</div>
+              <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>Чатов пока нет</div>
+              Нажмите кнопку 👤+ вверху чтобы добавить друга или найдите пользователя через поиск
+            </div>
+          )}
+
+          {/* Результаты глобального поиска */}
           {(activeTab === 'all' || activeTab === 'direct') && filteredOtherUsers.length > 0 && (
             <div>
               <div style={{ padding: '10px 18px 4px', fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
-                {contacts.length === 0 ? 'Все пользователи' : 'Другие пользователи'}
+                Глобальный поиск
               </div>
               {filteredOtherUsers.map(user => {
                 const isSelected = selectedUser?.id === user.id;
@@ -1613,6 +1650,27 @@ export default function Chat() {
 
               {/* Кнопки звонков и действий в шапке */}
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                {selectedUser && !contacts.some(c => c.id === selectedUser.id) && (
+                  <button
+                    onClick={() => handleAddFriendOrContact(selectedUser)}
+                    title="Добавить в друзья / контакты"
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '16px',
+                      backgroundColor: '#22c55e',
+                      color: 'white',
+                      border: 'none',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    👤+ В друзья
+                  </button>
+                )}
                 {/* ЗВОНКИ ТОЛЬКО В ЛИЧНЫХ ЧАТАХ (в каналах и группах звонки отключены) */}
                 {selectedUser && !currentCall && (
                   <>
@@ -2029,7 +2087,18 @@ export default function Chat() {
       {showProfile && profileUserId && (
         <ProfileModal userId={profileUserId} token={token!} onClose={() => setShowProfile(false)} />
       )}
-      {showAddFriend && <AddFriend token={token!} onClose={() => setShowAddFriend(false)} />}
+      {showAddFriend && (
+        <AddFriend
+          token={token!}
+          onClose={() => setShowAddFriend(false)}
+          onAdded={(u: any) => {
+            setRefreshContacts(p => p + 1);
+            setSelectedUser(u);
+            setSelectedGroup(null);
+            setSelectedChannel(null);
+          }}
+        />
+      )}
       {showGroupCreator && (
         <GroupCreator token={token!} onClose={() => setShowGroupCreator(false)} onCreated={() => setRefreshContacts(p => p + 1)} />
       )}
