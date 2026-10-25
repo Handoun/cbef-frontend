@@ -92,6 +92,21 @@ export default function Chat() {
   const [selectedChannel, setSelectedChannel] = useState<any | null>(null);
 
   const [messages, setMessages] = useState<Message[]>([]);
+
+  useEffect(() => {
+    currentCallRef.current = currentCall;
+  }, [currentCall]);
+
+  useEffect(() => {
+    if (remoteAudioRef.current && remoteStream) {
+      if (remoteAudioRef.current.srcObject !== remoteStream) {
+        remoteAudioRef.current.srcObject = remoteStream;
+      }
+      remoteAudioRef.current.muted = false;
+      remoteAudioRef.current.volume = 1.0;
+      remoteAudioRef.current.play().catch(() => {});
+    }
+  }, [remoteStream]);
   const [groupMessages, setGroupMessages] = useState<any[]>([]);
   const [channelMessages, setChannelMessages] = useState<any[]>([]);
   const [input, setInput] = useState('');
@@ -120,6 +135,7 @@ export default function Chat() {
   const localOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
   const callAcceptedRef = useRef<boolean>(false);
   const isProcessingOfferRef = useRef<boolean>(false);
+  const needsRenegotiationRef = useRef<boolean>(false);
   const remoteMediaStreamRef = useRef<MediaStream | null>(null);
   const queuedIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -251,6 +267,7 @@ export default function Chat() {
     localOfferRef.current = null;
     queuedIceCandidatesRef.current = [];
     callAcceptedRef.current = false;
+    needsRenegotiationRef.current = false;
     isProcessingOfferRef.current = false;
     activeCallPartnerIdRef.current = null;
     incomingCallTargetRef.current = null;
@@ -427,9 +444,11 @@ export default function Chat() {
         console.log('📷 Remote camera status signal:', signal.enabled);
         setIsRemoteCameraOn(Boolean(signal.enabled));
       } else if (signal?.type === 'offer') {
+        console.log('📨 Received WebRTC offer from:', fromId);
         pendingOfferRef.current = signal.offer;
-        if (callAcceptedRef.current && pc) {
-          await handleRemoteOfferAndAnswer(pc, fromId, signal.offer);
+        const currentPc = peerConnectionRef.current || pc;
+        if (currentPc && (callAcceptedRef.current || currentCallRef.current || currentCall)) {
+          await handleRemoteOfferAndAnswer(currentPc, fromId, signal.offer);
         }
       } else if (signal?.type === 'answer') {
         ringtone.stop();
@@ -444,6 +463,10 @@ export default function Chat() {
               } catch (e) {
                 console.warn('Error adding queued ICE candidate:', e);
               }
+            }
+            if (needsRenegotiationRef.current && activeCallPartnerIdRef.current) {
+              needsRenegotiationRef.current = false;
+              await renegotiate(pc, activeCallPartnerIdRef.current);
             }
           } catch (e) {
             console.error('Error setting remote answer:', e);
@@ -470,10 +493,20 @@ export default function Chat() {
         alert('Собеседник отклонил звонок.');
       } else {
         // Partner accepted call
+        callAcceptedRef.current = true;
+        currentCallRef.current = { id: 'active', partnerId: from };
+        activeCallPartnerIdRef.current = parseInt(from.toString());
+        callPartnerIdRef.current = parseInt(from.toString());
         callAnsweredTimeRef.current = Date.now();
         ringtone.stop();
         setCurrentCall({ id: 'active', partnerId: from });
 
+        const currentPc = peerConnectionRef.current;
+        if (currentPc && pendingOfferRef.current) {
+          const po = pendingOfferRef.current;
+          pendingOfferRef.current = null;
+          await handleRemoteOfferAndAnswer(currentPc, parseInt(from.toString()), po);
+        }
       }
     });
 
@@ -567,6 +600,13 @@ export default function Chat() {
         console.warn('Cannot apply remote offer in signalingState:', pc.signalingState);
         return;
       }
+      if (pc.signalingState === 'have-local-offer') {
+        try {
+          await pc.setLocalDescription({ type: 'rollback' });
+        } catch (e) {
+          console.warn('Rollback failed:', e);
+        }
+      }
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       while (queuedIceCandidatesRef.current.length > 0) {
         const cand = queuedIceCandidatesRef.current.shift()!;
@@ -601,13 +641,18 @@ export default function Chat() {
       if (!pc || !socket || !targetId) return;
       if (pc.signalingState !== 'stable') {
         console.warn('Renegotiate deferred, signalingState:', pc.signalingState);
+        needsRenegotiationRef.current = true;
         return;
       }
+      needsRenegotiationRef.current = false;
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: true,
       });
-      if (pc.signalingState !== 'stable') return;
+      if (pc.signalingState !== 'stable') {
+        needsRenegotiationRef.current = true;
+        return;
+      }
       await pc.setLocalDescription(offer);
       localOfferRef.current = { type: offer.type, sdp: offer.sdp };
       socket.emit('webrtc_signal', {
@@ -622,7 +667,7 @@ export default function Chat() {
 
   const setVideoSenderTrack = async (newTrack: MediaStreamTrack | null, stream?: MediaStream) => {
     const pc = peerConnectionRef.current;
-    const targetId = activeCallPartnerIdRef.current || selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
+    const targetId = activeCallPartnerIdRef.current || (currentCallRef.current?.partnerId ? parseInt(currentCallRef.current.partnerId.toString()) : null) || selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
     if (!pc || !targetId) return;
 
     let vTransceiver = pc.getTransceivers().find(
@@ -632,11 +677,8 @@ export default function Chat() {
     if (newTrack) {
       if (vTransceiver) {
         await vTransceiver.sender.replaceTrack(newTrack);
-        const wasSending = vTransceiver.direction === 'sendrecv';
         vTransceiver.direction = 'sendrecv';
-        if (!wasSending) {
-          await renegotiate(pc, targetId);
-        }
+        await renegotiate(pc, targetId);
       } else {
         pc.addTrack(newTrack, stream || new MediaStream([newTrack]));
         await renegotiate(pc, targetId);
@@ -707,6 +749,14 @@ export default function Chat() {
       setRemoteStream(new MediaStream(st.getTracks()));
       callAnsweredTimeRef.current = Date.now();
       ringtone.stop();
+    };
+
+    pc.onsignalingstatechange = () => {
+      console.log('📶 Signaling state changed to:', pc.signalingState);
+      if (pc.signalingState === 'stable' && needsRenegotiationRef.current && activeCallPartnerIdRef.current) {
+        needsRenegotiationRef.current = false;
+        renegotiate(pc, activeCallPartnerIdRef.current);
+      }
     };
 
     pc.onconnectionstatechange = () => {
@@ -864,7 +914,7 @@ export default function Chat() {
 
   const hangUp = (durationSeconds?: number) => {
     ringtone.stop();
-    const targetId = activeCallPartnerIdRef.current || selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
+    const targetId = activeCallPartnerIdRef.current || (currentCallRef.current?.partnerId ? parseInt(currentCallRef.current.partnerId.toString()) : null) || selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
     if (targetId && socket) {
       socket.emit('call_end', { to: targetId });
     }
@@ -882,7 +932,7 @@ export default function Chat() {
   };
 
   const toggleVideo = async () => {
-    const targetId = activeCallPartnerIdRef.current || selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
+    const targetId = activeCallPartnerIdRef.current || (currentCallRef.current?.partnerId ? parseInt(currentCallRef.current.partnerId.toString()) : null) || selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
     let st = localStreamRef.current || localStream;
 
     if (videoEnabled) {
@@ -937,7 +987,7 @@ export default function Chat() {
 
   const onShareScreen = async () => {
     try {
-      const targetId = activeCallPartnerIdRef.current || selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
+      const targetId = activeCallPartnerIdRef.current || (currentCallRef.current?.partnerId ? parseInt(currentCallRef.current.partnerId.toString()) : null) || selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
 
       if (screenStreamRef.current || screenStream) {
         // Stop screen share
@@ -1137,7 +1187,20 @@ export default function Chat() {
       )}
 
       {/* Выделенный фоновый аудио элемент для гарантированного звука звонков */}
-      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
+      <audio
+        ref={remoteAudioRef}
+        autoPlay
+        playsInline
+        style={{
+          position: 'fixed',
+          top: -1000,
+          left: -1000,
+          width: 1,
+          height: 1,
+          opacity: 0,
+          pointerEvents: 'none',
+        }}
+      />
 
       {/* ЛЕВАЯ КОЛОНКА (СПИСОК ЧАТОВ) */}
       <div

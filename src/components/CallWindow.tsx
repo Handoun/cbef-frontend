@@ -40,7 +40,6 @@ export default function CallWindow({
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const screenVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const [seconds, setSeconds] = useState(0);
   const [hasRemoteVideo, setHasRemoteVideo] = useState<boolean>(false);
 
@@ -103,24 +102,12 @@ export default function CallWindow({
     };
   }, [remoteStream]);
 
-  // Audio playback for both video and audio calls
+  // Audio tracks enabled
   useEffect(() => {
     if (remoteStream) {
       remoteStream.getAudioTracks().forEach(t => {
         t.enabled = true;
       });
-    }
-
-    if (remoteAudioRef.current && remoteStream) {
-      if (remoteAudioRef.current.srcObject !== remoteStream) {
-        remoteAudioRef.current.srcObject = remoteStream;
-      }
-      remoteAudioRef.current.muted = false;
-      remoteAudioRef.current.volume = 1.0;
-      const p = remoteAudioRef.current.play();
-      if (p !== undefined) {
-        p.catch(err => console.warn('remoteAudioRef autoPlay blocked:', err));
-      }
     }
   }, [remoteStream]);
 
@@ -137,11 +124,7 @@ export default function CallWindow({
         }
       } catch {}
 
-      if (remoteAudioRef.current && remoteAudioRef.current.paused) {
-        remoteAudioRef.current.muted = false;
-        remoteAudioRef.current.volume = 1.0;
-        remoteAudioRef.current.play().catch(() => {});
-      }
+
       if (remoteVideoRef.current && remoteVideoRef.current.paused) {
         remoteVideoRef.current.muted = true;
         remoteVideoRef.current.play().catch(() => {});
@@ -187,7 +170,7 @@ export default function CallWindow({
   const hasLiveVideoTrack = Boolean(
     remoteStream && remoteStream.getVideoTracks().some(t => t.readyState === 'live')
   );
-  const showVideoArea = Boolean(isRemoteScreenSharing || (hasLiveVideoTrack && (isRemoteCameraOn || isVideoCall || hasRemoteVideo)));
+  const showVideoArea = Boolean(isRemoteScreenSharing || isRemoteCameraOn || (hasLiveVideoTrack && (isVideoCall || hasRemoteVideo)));
 
   return (
     <motion.div
@@ -262,6 +245,7 @@ export default function CallWindow({
             autoPlay
             playsInline
             muted
+            onLoadedMetadata={() => screenVideoRef.current?.play().catch(() => {})}
             style={{ width: '100%', height: '100%', objectFit: 'contain' }}
           />
           <div
@@ -292,6 +276,7 @@ export default function CallWindow({
           autoPlay
           playsInline
           muted
+          onLoadedMetadata={() => remoteVideoRef.current?.play().catch(() => {})}
           style={{
             width: '100%',
             height: '100%',
@@ -332,7 +317,7 @@ export default function CallWindow({
         </div>
 
         {/* Локальное превью камеры (Picture-in-Picture) */}
-        {isVideoCall && (
+        {(isVideoCall || videoEnabled) && (
           <motion.div
             drag
             dragConstraints={{ top: -200, left: -400, right: 0, bottom: 0 }}
@@ -356,6 +341,7 @@ export default function CallWindow({
                 autoPlay
                 playsInline
                 muted
+                onLoadedMetadata={() => localVideoRef.current?.play().catch(() => {})}
                 style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }}
               />
             ) : (
@@ -437,21 +423,7 @@ export default function CallWindow({
         </button>
       </div>
 
-      {/* Выделенный аудио элемент для чистого проигрывания звука собеседника */}
-      <audio
-        ref={remoteAudioRef}
-        autoPlay
-        playsInline
-        style={{
-          position: 'absolute',
-          bottom: 10,
-          left: 10,
-          width: 2,
-          height: 2,
-          opacity: 0.01,
-          pointerEvents: 'none',
-        }}
-      />
+
     </motion.div>
   );
 }
