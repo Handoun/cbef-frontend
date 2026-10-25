@@ -42,9 +42,11 @@ export default function Settings() {
     if (token) {
       // Load current profile data
       axios
-        .get(`${API_URL}/api/users/${currentUser.id}`, { headers: { Authorization: `Bearer ${token}` } })
+        .get(`${API_URL}/api/users/profile${currentUser.id}`, { headers: { Authorization: `Bearer ${token}` } })
         .then(res => {
           if (res.data) {
+            const u = JSON.parse(localStorage.getItem('user') || '{}');
+            localStorage.setItem('user', JSON.stringify({ ...u, ...res.data }));
             if (res.data.username) setUsername(res.data.username);
             if (res.data.bio !== undefined) setBio(res.data.bio || '');
             if (res.data.avatar) {

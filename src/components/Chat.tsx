@@ -63,9 +63,24 @@ interface Message {
   text: string;
   image?: string;
   audio?: string;
+  video?: string;
   status?: string;
   created_at: string;
   expires_at?: string;
+}
+
+function optimizeSdpBitrate(sdp: string, bitrateKbps: number = 4000): string {
+  if (!sdp) return sdp;
+  const lines = sdp.split(/\r?\n/);
+  const out: string[] = [];
+  for (const l of lines) {
+    out.push(l);
+    if (l.startsWith('a=mid:video') || (l.startsWith('m=video') && !sdp.includes('a=mid:video'))) {
+      out.push(`b=AS:${bitrateKbps}`);
+      out.push(`b=TIAS:${bitrateKbps * 1000}`);
+    }
+  }
+  return out.join('\r\n');
 }
 
 export default function Chat() {
@@ -146,6 +161,7 @@ export default function Chat() {
   // Audio elements
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Modals & UI states
@@ -183,8 +199,25 @@ export default function Chat() {
 
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
   const token = localStorage.getItem('token');
-  const isAdmin = currentUser.is_admin === true || currentUser.isAdmin === true;
+  const [isAdminState, setIsAdminState] = useState<boolean>(currentUser.is_admin === true || currentUser.isAdmin === true);
+  const isAdmin = isAdminState;
   const isPremium = currentUser.is_premium === true || currentUser.premium === true;
+
+  // Sync profile & admin permissions directly from server on mount
+  useEffect(() => {
+    if (!token) return;
+    axios.get(`${API_URL}/api/users/profile`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => {
+        if (res.data) {
+          const updated = { ...currentUser, ...res.data };
+          localStorage.setItem('user', JSON.stringify(updated));
+          if (res.data.is_admin !== undefined) {
+            setIsAdminState(Boolean(res.data.is_admin));
+          }
+        }
+      })
+      .catch(() => {});
+  }, [token]);
 
   // Dynamic window resize listener for seamless responsive design
   useEffect(() => {
@@ -216,6 +249,22 @@ export default function Chat() {
       remoteAudioRef.current.play().catch(() => {});
     }
   }, [remoteStream]);
+
+  const handleDeleteMessage = async (msgId: number) => {
+    if (!confirm('Удалить это сообщение?')) return;
+    try {
+      if (socket) {
+        socket.emit('delete_message', { messageId: msgId });
+      }
+      await axios.delete(`${API_URL}/api/messages/${msgId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setMessages(prev => prev.filter(m => m.id !== msgId));
+      setGroupMessages(prev => prev.filter(m => m.id !== msgId));
+    } catch (e) {
+      console.error('Failed to delete message:', e);
+    }
+  };
 
   const handleAddFriendOrContact = async (userToContact: User) => {
     try {
@@ -351,6 +400,11 @@ export default function Chat() {
     setSocket(newSocket);
 
     newSocket.on('connect', () => console.log('Socket connected'));
+
+    newSocket.on('message_deleted', ({ messageId }: { messageId: number }) => {
+      setMessages(prev => prev.filter(m => m.id !== messageId));
+      setGroupMessages(prev => prev.filter(m => m.id !== messageId));
+    });
 
     newSocket.on('private_message', (msg: Message) => {
       if (selectedUser && (msg.sender_id === selectedUser.id || msg.sender_id === currentUser.id)) {
@@ -588,7 +642,7 @@ export default function Chat() {
       .catch(console.error);
   }, [selectedChannel, token]);
 
-  const sendMessage = (extra?: { image?: string; audio?: string }) => {
+  const sendMessage = (extra?: { image?: string; audio?: string; video?: string }) => {
     if (!socket) return;
     const text = input.trim();
     if (!text && !extra) return;
@@ -607,6 +661,20 @@ export default function Chat() {
     setInput('');
     setShowEmoji(false);
     setTtl(0);
+  };
+
+  const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 50 * 1024 * 1024) {
+      alert('Размер видео не должен превышать 50МБ');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => sendMessage({ video: reader.result as string });
+    reader.readAsDataURL(f);
+    if (videoInputRef.current) videoInputRef.current.value = '';
+    setShowAttachment(false);
   };
 
   // Native WebRTC Calling Implementation
@@ -647,12 +715,13 @@ export default function Chat() {
         return;
       }
       const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
+      const boostedAnswer = { type: answer.type, sdp: optimizeSdpBitrate(answer.sdp || '', 4000) };
+      await pc.setLocalDescription(boostedAnswer);
 
       if (socket) {
         socket.emit('webrtc_signal', {
           to: partnerId,
-          signal: { type: 'answer', answer: { type: answer.type, sdp: answer.sdp } },
+          signal: { type: 'answer', answer: boostedAnswer },
         });
       }
     } catch (err) {
@@ -679,11 +748,12 @@ export default function Chat() {
         needsRenegotiationRef.current = true;
         return;
       }
-      await pc.setLocalDescription(offer);
-      localOfferRef.current = { type: offer.type, sdp: offer.sdp };
+      const boostedOffer = { type: offer.type, sdp: optimizeSdpBitrate(offer.sdp || '', 4000) };
+      await pc.setLocalDescription(boostedOffer);
+      localOfferRef.current = boostedOffer;
       socket.emit('webrtc_signal', {
         to: targetId,
-        signal: { type: 'offer', offer: { type: offer.type, sdp: offer.sdp } },
+        signal: { type: 'offer', offer: boostedOffer },
       });
       console.log('📡 Sent renegotiation offer to partner:', targetId);
     } catch (e) {
@@ -704,6 +774,14 @@ export default function Chat() {
       if (vTransceiver) {
         await vTransceiver.sender.replaceTrack(newTrack);
         vTransceiver.direction = 'sendrecv';
+        try {
+          const params = vTransceiver.sender.getParameters();
+          if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+          params.encodings[0].maxBitrate = 4000000;
+          params.encodings[0].networkPriority = 'high';
+          (params as any).degradationPreference = 'maintain-framerate';
+          await vTransceiver.sender.setParameters(params);
+        } catch {}
         await renegotiate(pc, targetId);
       } else {
         pc.addTrack(newTrack, stream || new MediaStream([newTrack]));
@@ -814,8 +892,14 @@ export default function Chat() {
 
     let stream: MediaStream | null = null;
     const audioOptions = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+    const videoOptions = video ? {
+      facingMode: 'user',
+      width: { ideal: 1280, max: 1920 },
+      height: { ideal: 720, max: 1080 },
+      frameRate: { ideal: 30, max: 60 }
+    } : false;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: audioOptions, video: video ? { facingMode: 'user' } : false });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: audioOptions, video: videoOptions });
     } catch {
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: audioOptions, video: false });
@@ -849,15 +933,16 @@ export default function Chat() {
         offerToReceiveAudio: true,
         offerToReceiveVideo: true,
       });
-      await pc.setLocalDescription(offer);
-      localOfferRef.current = { type: offer.type, sdp: offer.sdp };
+      const boostedOffer = { type: offer.type, sdp: optimizeSdpBitrate(offer.sdp || '', 4000) };
+      await pc.setLocalDescription(boostedOffer);
+      localOfferRef.current = boostedOffer;
 
       socket.emit('call_initiate', {
         to: selectedUser.id,
         isVideo: video,
         callerName: currentUser.username,
         callerAvatar: currentUser.avatar || localStorage.getItem('avatar'),
-        offer: { type: offer.type, sdp: offer.sdp },
+        offer: boostedOffer,
       });
     } catch (err) {
       console.error('Failed to create offer:', err);
@@ -1033,9 +1118,15 @@ export default function Chat() {
         const camTrack = (videoEnabled && localStreamRef.current?.getVideoTracks().find(t => t.readyState === 'live')) || null;
         await setVideoSenderTrack(camTrack, localStreamRef.current || undefined);
       } else {
-        // Start screen share
+        // Start screen share with high resolution and 30-60 FPS
         const stream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
+          video: {
+            cursor: 'always',
+            displaySurface: 'monitor',
+            frameRate: { ideal: 30, max: 60 },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          } as any,
           audio: false,
         });
 
@@ -1043,6 +1134,9 @@ export default function Chat() {
         setScreenStream(stream);
 
         const screenTrack = stream.getVideoTracks()[0];
+        if (screenTrack) {
+          try { (screenTrack as any).contentHint = 'motion'; } catch {}
+        }
 
         if (socket && targetId) {
           socket.emit('webrtc_signal', {
@@ -1774,19 +1868,98 @@ export default function Chat() {
                         }}
                       >
                         {msg.image && (
-                          <img
-                            src={msg.image}
-                            alt="attached"
-                            onClick={() => setSelectedImage(msg.image!)}
-                            style={{
-                              maxWidth: '100%',
-                              maxHeight: '260px',
-                              borderRadius: '12px',
-                              marginBottom: 6,
-                              cursor: 'pointer',
-                              display: 'block',
-                            }}
-                          />
+                          <div style={{ position: 'relative', marginBottom: 6 }}>
+                            <img
+                              src={msg.image}
+                              alt="attached"
+                              onClick={() => setSelectedImage(msg.image!)}
+                              style={{
+                                maxWidth: '100%',
+                                maxHeight: '260px',
+                                borderRadius: '12px',
+                                cursor: 'pointer',
+                                display: 'block',
+                              }}
+                            />
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const a = document.createElement('a');
+                                a.href = msg.image!;
+                                a.download = `cbef-image-${msg.id || Date.now()}.png`;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                              }}
+                              title="Скачать фото"
+                              style={{
+                                position: 'absolute',
+                                top: 6,
+                                right: 6,
+                                backgroundColor: 'rgba(0,0,0,0.65)',
+                                backdropFilter: 'blur(6px)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '50%',
+                                width: 30,
+                                height: 30,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                fontSize: 13,
+                              }}
+                            >
+                              ⬇️
+                            </button>
+                          </div>
+                        )}
+                        {msg.video && (
+                          <div style={{ position: 'relative', marginBottom: 6 }}>
+                            <video
+                              controls
+                              playsInline
+                              src={msg.video}
+                              style={{
+                                maxWidth: '100%',
+                                maxHeight: '300px',
+                                borderRadius: '12px',
+                                display: 'block',
+                                backgroundColor: '#000',
+                              }}
+                            />
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const a = document.createElement('a');
+                                a.href = msg.video!;
+                                a.download = `cbef-video-${msg.id || Date.now()}.mp4`;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                              }}
+                              title="Скачать видео"
+                              style={{
+                                position: 'absolute',
+                                top: 6,
+                                right: 6,
+                                backgroundColor: 'rgba(0,0,0,0.65)',
+                                backdropFilter: 'blur(6px)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '50%',
+                                width: 30,
+                                height: 30,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                fontSize: 13,
+                              }}
+                            >
+                              ⬇️
+                            </button>
+                          </div>
                         )}
                         {msg.audio && <audio controls src={msg.audio} style={{ width: '220px', marginBottom: 4 }} />}
                         {msg.text && (msg.text.startsWith('📞') || msg.text.startsWith('❌') || msg.text.startsWith('🚫')) ? (
@@ -1880,6 +2053,26 @@ export default function Chat() {
                               {msg.status === 'read' ? '✓✓' : msg.status === 'delivered' ? '✓✓' : '✓'}
                             </span>
                           )}
+                          {(isOwn || isAdmin) && (
+                            <button
+                              onClick={() => handleDeleteMessage(msg.id)}
+                              title="Удалить сообщение"
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'inherit',
+                                opacity: 0.6,
+                                cursor: 'pointer',
+                                fontSize: 12,
+                                padding: '0 2px',
+                                marginLeft: 4,
+                              }}
+                              onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                              onMouseLeave={e => (e.currentTarget.style.opacity = '0.6')}
+                            >
+                              🗑️
+                            </button>
+                          )}
                         </div>
                       </div>
                     </motion.div>
@@ -1907,6 +2100,13 @@ export default function Chat() {
                 ref={fileInputRef}
                 style={{ display: 'none' }}
                 onChange={handleImageUpload}
+              />
+              <input
+                type="file"
+                accept="video/mp4,video/webm,video/ogg,video/quicktime"
+                ref={videoInputRef}
+                style={{ display: 'none' }}
+                onChange={handleVideoUpload}
               />
               <button
                 onClick={() => setShowAttachment(!showAttachment)}
@@ -1936,6 +2136,9 @@ export default function Chat() {
                 >
                   <button style={iconActionBtn} onClick={() => fileInputRef.current?.click()} title="Фотография">
                     🖼️
+                  </button>
+                  <button style={iconActionBtn} onClick={() => videoInputRef.current?.click()} title="Видео">
+                    🎥
                   </button>
                   <button style={iconActionBtn} onClick={() => setShowStickerPack(true)} title="Стикеры">
                     📦
