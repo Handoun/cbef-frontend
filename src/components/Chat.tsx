@@ -118,6 +118,7 @@ export default function Chat() {
   const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
   const localOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
   const callAcceptedRef = useRef<boolean>(false);
+  const isProcessingOfferRef = useRef<boolean>(false);
   const remoteMediaStreamRef = useRef<MediaStream | null>(null);
   const queuedIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -249,6 +250,7 @@ export default function Chat() {
     localOfferRef.current = null;
     queuedIceCandidatesRef.current = [];
     callAcceptedRef.current = false;
+    isProcessingOfferRef.current = false;
     activeCallPartnerIdRef.current = null;
     incomingCallTargetRef.current = null;
 
@@ -549,6 +551,11 @@ export default function Chat() {
 
   // Native WebRTC Calling Implementation
   const handleRemoteOfferAndAnswer = async (pc: RTCPeerConnection, partnerId: number, offer: any) => {
+    if (isProcessingOfferRef.current) {
+      console.log('Already processing an offer, skipping duplicate attempt');
+      return;
+    }
+    isProcessingOfferRef.current = true;
     try {
       if (!offer || !offer.sdp) return;
       if (pc.remoteDescription && pc.remoteDescription.sdp === offer.sdp) {
@@ -583,6 +590,62 @@ export default function Chat() {
       }
     } catch (err) {
       console.error('Failed to handle offer and answer:', err);
+    } finally {
+      isProcessingOfferRef.current = false;
+    }
+  };
+
+  const renegotiate = async (pc: RTCPeerConnection, targetId: number) => {
+    try {
+      if (!pc || !socket || !targetId) return;
+      if (pc.signalingState !== 'stable') {
+        console.warn('Renegotiate deferred, signalingState:', pc.signalingState);
+        return;
+      }
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+      });
+      if (pc.signalingState !== 'stable') return;
+      await pc.setLocalDescription(offer);
+      localOfferRef.current = { type: offer.type, sdp: offer.sdp };
+      socket.emit('webrtc_signal', {
+        to: targetId,
+        signal: { type: 'offer', offer: { type: offer.type, sdp: offer.sdp } },
+      });
+      console.log('📡 Sent renegotiation offer to partner:', targetId);
+    } catch (e) {
+      console.error('Failed to renegotiate:', e);
+    }
+  };
+
+  const setVideoSenderTrack = async (newTrack: MediaStreamTrack | null, stream?: MediaStream) => {
+    const pc = peerConnectionRef.current;
+    const targetId = activeCallPartnerIdRef.current || selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
+    if (!pc || !targetId) return;
+
+    let vTransceiver = pc.getTransceivers().find(
+      t => t.receiver.track?.kind === 'video' || t.sender.track?.kind === 'video'
+    );
+
+    if (newTrack) {
+      if (vTransceiver) {
+        await vTransceiver.sender.replaceTrack(newTrack);
+        const wasSending = vTransceiver.direction === 'sendrecv';
+        vTransceiver.direction = 'sendrecv';
+        if (!wasSending) {
+          await renegotiate(pc, targetId);
+        }
+      } else {
+        pc.addTrack(newTrack, stream || new MediaStream([newTrack]));
+        await renegotiate(pc, targetId);
+      }
+    } else {
+      if (vTransceiver) {
+        await vTransceiver.sender.replaceTrack(null);
+        vTransceiver.direction = 'recvonly';
+        await renegotiate(pc, targetId);
+      }
     }
   };
 
@@ -632,6 +695,13 @@ export default function Chat() {
 
       st.getAudioTracks().forEach(t => { t.enabled = true; });
       st.getVideoTracks().forEach(t => { t.enabled = true; });
+
+      if (remoteAudioRef.current && event.track.kind === 'audio') {
+        remoteAudioRef.current.srcObject = st;
+        remoteAudioRef.current.muted = false;
+        remoteAudioRef.current.volume = 1.0;
+        remoteAudioRef.current.play().catch(() => {});
+      }
 
       setRemoteStream(new MediaStream(st.getTracks()));
       callAnsweredTimeRef.current = Date.now();
@@ -711,11 +781,6 @@ export default function Chat() {
         callerName: currentUser.username,
         callerAvatar: currentUser.avatar || localStorage.getItem('avatar'),
         offer: { type: offer.type, sdp: offer.sdp },
-      });
-
-      socket.emit('webrtc_signal', {
-        to: selectedUser.id,
-        signal: { type: 'offer', offer: { type: offer.type, sdp: offer.sdp } },
       });
     } catch (err) {
       console.error('Failed to create offer:', err);
@@ -815,9 +880,8 @@ export default function Chat() {
     endCallCleanup();
   };
 
-    const toggleVideo = async () => {
+  const toggleVideo = async () => {
     const targetId = activeCallPartnerIdRef.current || selectedUser?.id || (incomingCall ? parseInt(incomingCall.from) : null);
-    const pc = peerConnectionRef.current;
     let st = localStreamRef.current || localStream;
 
     if (videoEnabled) {
@@ -830,11 +894,9 @@ export default function Chat() {
         });
       }
       setVideoEnabled(false);
-      if (pc) {
-        const vSender = pc.getSenders().find(s => s.track?.kind === 'video' || (s.track === null));
-        if (vSender) {
-          try { await vSender.replaceTrack(null); } catch {}
-        }
+      // If screen share is not active, clear video sender
+      if (!screenStreamRef.current && !screenStream) {
+        await setVideoSenderTrack(null);
       }
       if (socket && targetId) {
         socket.emit('webrtc_signal', { to: targetId, signal: { type: 'camera_status', enabled: false } });
@@ -857,23 +919,11 @@ export default function Chat() {
         setVideoEnabled(true);
         setIsVideoCall(true);
 
-        if (pc) {
-          let vSender = pc.getSenders().find(s => s.track?.kind === 'video' || (s.track === null));
-          if (vSender) {
-            try { await vSender.replaceTrack(newVideoTrack); } catch {}
-          } else {
-            pc.addTrack(newVideoTrack, st);
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            localOfferRef.current = { type: offer.type, sdp: offer.sdp };
-            if (socket && targetId) {
-              socket.emit('webrtc_signal', {
-                to: targetId,
-                signal: { type: 'offer', offer: { type: offer.type, sdp: offer.sdp } },
-              });
-            }
-          }
+        // If screen share is not active, send camera track
+        if (!screenStreamRef.current && !screenStream) {
+          await setVideoSenderTrack(newVideoTrack, st);
         }
+
         if (socket && targetId) {
           socket.emit('webrtc_signal', { to: targetId, signal: { type: 'camera_status', enabled: true } });
         }
@@ -902,14 +952,9 @@ export default function Chat() {
           });
         }
 
-        const pc = peerConnectionRef.current;
-        if (pc) {
-          const videoSender = pc.getSenders().find(s => s.track?.kind === 'video' || (s.track === null));
-          const camTrack = localStreamRef.current?.getVideoTracks()[0] || null;
-          if (videoSender) {
-            await videoSender.replaceTrack(camTrack);
-          }
-        }
+        // Restore camera track if enabled, otherwise clear video sender
+        const camTrack = (videoEnabled && localStreamRef.current?.getVideoTracks().find(t => t.readyState === 'live')) || null;
+        await setVideoSenderTrack(camTrack, localStreamRef.current || undefined);
       } else {
         // Start screen share
         const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -920,7 +965,6 @@ export default function Chat() {
         screenStreamRef.current = stream;
         setScreenStream(stream);
 
-        const pc = peerConnectionRef.current;
         const screenTrack = stream.getVideoTracks()[0];
 
         if (socket && targetId) {
@@ -930,27 +974,8 @@ export default function Chat() {
           });
         }
 
-        if (pc && screenTrack) {
-          let videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
-          if (!videoSender) {
-            videoSender = pc.getSenders().find(s => !s.track);
-          }
-
-          if (videoSender) {
-            await videoSender.replaceTrack(screenTrack);
-          } else {
-            // No video sender (e.g. audio-only call) -> addTrack and renegotiate
-            pc.addTrack(screenTrack, stream);
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            localOfferRef.current = { type: offer.type, sdp: offer.sdp };
-            if (socket && targetId) {
-              socket.emit('webrtc_signal', {
-                to: targetId,
-                signal: { type: 'offer', offer: { type: offer.type, sdp: offer.sdp } },
-              });
-            }
-          }
+        if (screenTrack) {
+          await setVideoSenderTrack(screenTrack, stream);
         }
 
         screenTrack.onended = async () => {
@@ -964,14 +989,8 @@ export default function Chat() {
             });
           }
 
-          const p = peerConnectionRef.current;
-          if (p) {
-            const videoSender = p.getSenders().find(s => s.track?.kind === 'video' || !s.track);
-            const camTrack = localStreamRef.current?.getVideoTracks()[0] || null;
-            if (videoSender) {
-              await videoSender.replaceTrack(camTrack);
-            }
-          }
+          const camTrack = (videoEnabled && localStreamRef.current?.getVideoTracks().find(t => t.readyState === 'live')) || null;
+          await setVideoSenderTrack(camTrack, localStreamRef.current || undefined);
         };
       }
     } catch (err) {
@@ -1186,6 +1205,9 @@ export default function Chat() {
           isRemoteCameraOn={isRemoteCameraOn}
         />
       )}
+
+      {/* Выделенный фоновый аудио элемент для гарантированного звука звонков */}
+      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
 
       {/* ЛЕВАЯ КОЛОНКА (СПИСОК ЧАТОВ) */}
       <div

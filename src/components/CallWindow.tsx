@@ -59,7 +59,12 @@ export default function CallWindow({
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
+      localVideoRef.current.muted = true;
+      localVideoRef.current.defaultMuted = true;
+      if (localVideoRef.current.srcObject !== localStream) {
+        localVideoRef.current.srcObject = localStream;
+      }
+      localVideoRef.current.play().catch(() => {});
     }
   }, [localStream]);
 
@@ -104,7 +109,9 @@ export default function CallWindow({
     }
 
     if (remoteAudioRef.current && remoteStream) {
-      remoteAudioRef.current.srcObject = remoteStream;
+      if (remoteAudioRef.current.srcObject !== remoteStream) {
+        remoteAudioRef.current.srcObject = remoteStream;
+      }
       remoteAudioRef.current.muted = false;
       remoteAudioRef.current.volume = 1.0;
       const p = remoteAudioRef.current.play();
@@ -127,17 +134,18 @@ export default function CallWindow({
         }
       } catch {}
 
-      if (remoteAudioRef.current) {
+      if (remoteAudioRef.current && remoteAudioRef.current.paused) {
         remoteAudioRef.current.muted = false;
         remoteAudioRef.current.volume = 1.0;
         remoteAudioRef.current.play().catch(() => {});
       }
-      if (remoteVideoRef.current) {
+      if (remoteVideoRef.current && remoteVideoRef.current.paused) {
+        remoteVideoRef.current.muted = true;
         remoteVideoRef.current.play().catch(() => {});
       }
     };
-    window.addEventListener('click', unlock, { once: true });
-    window.addEventListener('touchstart', unlock, { once: true });
+    window.addEventListener('click', unlock);
+    window.addEventListener('touchstart', unlock);
     return () => {
       window.removeEventListener('click', unlock);
       window.removeEventListener('touchstart', unlock);
@@ -145,26 +153,38 @@ export default function CallWindow({
   }, []);
 
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream;
-      const p = remoteVideoRef.current.play();
-      if (p !== undefined) {
-        p.catch(err => console.warn('remoteVideoRef autoPlay blocked:', err));
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.muted = true;
+      remoteVideoRef.current.defaultMuted = true;
+      if (remoteStream && remoteVideoRef.current.srcObject !== remoteStream) {
+        remoteVideoRef.current.srcObject = remoteStream;
+      }
+      if (remoteStream) {
+        const p = remoteVideoRef.current.play();
+        if (p !== undefined) {
+          p.catch(err => console.warn('remoteVideoRef autoPlay blocked:', err));
+        }
       }
     }
   }, [remoteStream, hasRemoteVideo, isRemoteScreenSharing]);
 
   useEffect(() => {
-    if (screenVideoRef.current && screenStream) {
-      screenVideoRef.current.srcObject = screenStream;
-      screenVideoRef.current.play().catch(() => {});
+    if (screenVideoRef.current) {
+      screenVideoRef.current.muted = true;
+      screenVideoRef.current.defaultMuted = true;
+      if (screenStream && screenVideoRef.current.srcObject !== screenStream) {
+        screenVideoRef.current.srcObject = screenStream;
+      }
+      if (screenStream) {
+        screenVideoRef.current.play().catch(() => {});
+      }
     }
   }, [screenStream]);
 
   const hasLiveVideoTrack = Boolean(
     remoteStream && remoteStream.getVideoTracks().some(t => t.readyState === 'live')
   );
-  const showVideoArea = Boolean((hasLiveVideoTrack && (isRemoteCameraOn || isVideoCall || hasRemoteVideo)) || isRemoteScreenSharing);
+  const showVideoArea = Boolean(isRemoteScreenSharing || (hasLiveVideoTrack && (isRemoteCameraOn || isVideoCall || hasRemoteVideo)));
 
   return (
     <motion.div
@@ -232,72 +252,81 @@ export default function CallWindow({
           background: 'radial-gradient(circle, rgba(30,41,59,0.8) 0%, rgba(15,23,42,0.95) 100%)',
         }}
       >
-        {screenStream ? (
-          <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-            <video
-              ref={screenVideoRef}
-              autoPlay
-              playsInline
-              muted
-              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-            />
-            <div
-              style={{
-                position: 'absolute',
-                top: 16,
-                left: 16,
-                background: 'rgba(0,0,0,0.65)',
-                backdropFilter: 'blur(8px)',
-                padding: '6px 14px',
-                borderRadius: '20px',
-                fontSize: 13,
-                color: '#22c55e',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                border: '1px solid rgba(34, 197, 94, 0.3)',
-              }}
-            >
-              <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#22c55e' }} />
-              Вы демонстрируете экран
-            </div>
-          </div>
-        ) : showVideoArea ? (
+        {/* Локальная демонстрация экрана */}
+        <div style={{ position: 'relative', width: '100%', height: '100%', display: screenStream ? 'block' : 'none' }}>
           <video
-            ref={remoteVideoRef}
+            ref={screenVideoRef}
             autoPlay
             playsInline
             muted
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: isRemoteScreenSharing ? 'contain' : 'cover',
-            }}
+            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
           />
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
-            <motion.div
-              animate={{
-                scale: [1, 1.06, 1],
-                boxShadow: [
-                  '0 0 0 0 rgba(59, 130, 246, 0.4)',
-                  '0 0 0 24px rgba(59, 130, 246, 0)',
-                  '0 0 0 0 rgba(59, 130, 246, 0)',
-                ],
-              }}
-              transition={{ repeat: Infinity, duration: 2.2, ease: 'easeInOut' }}
-              style={{ borderRadius: '50%' }}
-            >
-              <Avatar src={remoteAvatar} name={remoteName} size={140} />
-            </motion.div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 22, fontWeight: 700 }}>{remoteName}</div>
-              <div style={{ color: '#38bdf8', marginTop: 4, fontSize: 14 }}>
-                {audioEnabled ? 'Соединение установлено' : 'Микрофон отключен'}
-              </div>
+          <div
+            style={{
+              position: 'absolute',
+              top: 16,
+              left: 16,
+              background: 'rgba(0,0,0,0.65)',
+              backdropFilter: 'blur(8px)',
+              padding: '6px 14px',
+              borderRadius: '20px',
+              fontSize: 13,
+              color: '#22c55e',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              border: '1px solid rgba(34, 197, 94, 0.3)',
+            }}
+          >
+            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#22c55e' }} />
+            Вы демонстрируете экран
+          </div>
+        </div>
+
+        {/* Удаленное видео / удаленная демонстрация экрана */}
+        <video
+          ref={remoteVideoRef}
+          autoPlay
+          playsInline
+          muted
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: isRemoteScreenSharing ? 'contain' : 'cover',
+            display: !screenStream && showVideoArea ? 'block' : 'none',
+          }}
+        />
+
+        {/* Пульсирующий аватар для голосового режима */}
+        <div
+          style={{
+            display: !screenStream && !showVideoArea ? 'flex' : 'none',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 20,
+          }}
+        >
+          <motion.div
+            animate={{
+              scale: [1, 1.06, 1],
+              boxShadow: [
+                '0 0 0 0 rgba(59, 130, 246, 0.4)',
+                '0 0 0 24px rgba(59, 130, 246, 0)',
+                '0 0 0 0 rgba(59, 130, 246, 0)',
+              ],
+            }}
+            transition={{ repeat: Infinity, duration: 2.2, ease: 'easeInOut' }}
+            style={{ borderRadius: '50%' }}
+          >
+            <Avatar src={remoteAvatar} name={remoteName} size={140} />
+          </motion.div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{remoteName}</div>
+            <div style={{ color: '#38bdf8', marginTop: 4, fontSize: 14 }}>
+              {audioEnabled ? 'Соединение установлено' : 'Микрофон отключен'}
             </div>
           </div>
-        )}
+        </div>
 
         {/* Локальное превью камеры (Picture-in-Picture) */}
         {isVideoCall && (
