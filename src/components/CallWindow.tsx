@@ -44,12 +44,15 @@ export default function CallWindow({
   const [seconds, setSeconds] = useState(0);
   const [hasRemoteVideo, setHasRemoteVideo] = useState<boolean>(false);
 
+  const isConnected = Boolean(remoteStream && remoteStream.getTracks().some(t => t.readyState === 'live'));
+
   useEffect(() => {
+    if (!isConnected) return;
     const interval = setInterval(() => {
       setSeconds(s => s + 1);
     }, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isConnected]);
 
   const formatTime = (totalSeconds: number) => {
     const mins = Math.floor(totalSeconds / 60);
@@ -233,7 +236,7 @@ export default function CallWindow({
             : isVideoCall
             ? 'Видеозвонок'
             : 'Аудиозвонок'}{' '}
-          • {formatTime(seconds)}
+          • {isConnected ? formatTime(seconds) : 'Вызов...'}
         </div>
       </div>
 
@@ -323,7 +326,7 @@ export default function CallWindow({
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 22, fontWeight: 700 }}>{remoteName}</div>
             <div style={{ color: '#38bdf8', marginTop: 4, fontSize: 14 }}>
-              {audioEnabled ? 'Соединение установлено' : 'Микрофон отключен'}
+              {!isConnected ? 'Ожидание ответа собеседника...' : audioEnabled ? 'В разговоре' : 'Микрофон отключен'}
             </div>
           </div>
         </div>

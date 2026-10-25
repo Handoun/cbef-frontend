@@ -17,6 +17,7 @@ import UpdateBanner from './UpdateBanner';
 import ImageLightbox from './ImageLightbox';
 import ChannelSearch from './ChannelSearch';
 import ProfileModal from './ProfileModal';
+import IncomingCallModal from './IncomingCallModal';
 import { ringtone } from '../utils/ringtone';
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -1097,86 +1098,15 @@ export default function Chat() {
     >
       <UpdateBanner />
 
-      {/* Модальное окно входящего звонка с музыкой и аватаром */}
+      {/* Премиальное модальное окно входящего звонка */}
       {incomingCall && !currentCall && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.65)',
-            backdropFilter: 'blur(10px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 6000,
-          }}
-        >
-          <motion.div
-            initial={{ scale: 0.85, y: 20 }}
-            animate={{ scale: 1, y: 0 }}
-            style={{
-              backgroundColor: 'var(--sidebar-bg)',
-              border: '1px solid var(--border-color)',
-              padding: '36px 32px',
-              borderRadius: '28px',
-              textAlign: 'center',
-              boxShadow: '0 24px 60px rgba(0,0,0,0.3)',
-              maxWidth: '380px',
-              width: '90%',
-            }}
-          >
-            <motion.div
-              animate={{ scale: [1, 1.08, 1] }}
-              transition={{ repeat: Infinity, duration: 1.8 }}
-              style={{ display: 'inline-block', marginBottom: 16 }}
-            >
-              <Avatar src={incomingCaller?.avatar} name={incomingCaller?.username || `ID ${incomingCall.from}`} size={84} />
-            </motion.div>
-            <h3 style={{ fontSize: 20, fontWeight: 700, margin: '0 0 6px' }}>Входящий звонок</h3>
-            <p style={{ fontSize: 16, color: 'var(--text-secondary)', margin: '0 0 24px' }}>
-              {incomingCaller?.username || `Пользователь #${incomingCall.from}`}
-            </p>
-            <div style={{ display: 'flex', gap: 16, justifyContent: 'center' }}>
-              <button
-                onClick={acceptCall}
-                style={{
-                  padding: '12px 28px',
-                  borderRadius: '30px',
-                  backgroundColor: '#22c55e',
-                  color: 'white',
-                  border: 'none',
-                  fontWeight: 600,
-                  fontSize: 15,
-                  cursor: 'pointer',
-                  boxShadow: '0 4px 14px rgba(34, 197, 94, 0.4)',
-                }}
-              >
-                📞 Ответить
-              </button>
-              <button
-                onClick={declineCall}
-                style={{
-                  padding: '12px 24px',
-                  borderRadius: '30px',
-                  backgroundColor: '#ef4444',
-                  color: 'white',
-                  border: 'none',
-                  fontWeight: 600,
-                  fontSize: 15,
-                  cursor: 'pointer',
-                  boxShadow: '0 4px 14px rgba(239, 68, 68, 0.4)',
-                }}
-              >
-                Отклонить
-              </button>
-            </div>
-          </motion.div>
-        </motion.div>
+        <IncomingCallModal
+          callerName={incomingCaller?.username || incomingCall.callerName || `Пользователь #${incomingCall.from}`}
+          callerAvatar={incomingCaller?.avatar || incomingCall.callerAvatar}
+          isVideo={incomingCall.isVideo}
+          onAccept={acceptCall}
+          onDecline={declineCall}
+        />
       )}
 
       {/* Окно активного звонка */}
